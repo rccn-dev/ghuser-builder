@@ -111,10 +111,10 @@ The image tag names one exact toolchain, recorded as image labels:
 | `pythonnet` | hosts Mono from Python | `Dockerfile` |
 
 To release a new image: bump a pin, set the template's `GHUSER_BUILDER_IMAGE` to the
-new version, then tag `vX.Y.Z`. CI builds, tests on the examples, and pushes
-`$CI_REGISTRY_IMAGE:X.Y.Z`. CI refuses a tag that doesn't match the template. The
-build job needs a **privileged runner** (Docker-in-Docker). Without one, build on a
-lab machine with `docker build -t <registry>/libs/ghuser-builder:X.Y.Z . && docker push …`.
+new version, then tag `vX.Y.Z`. CI builds the image with kaniko (no Docker daemon,
+no privileged runner), tests it on the examples, and copies the tested image to
+`$CI_REGISTRY_IMAGE:X.Y.Z` with crane. CI refuses a tag that doesn't match the
+template.
 
 Projects upgrade by changing `ref:` in their `include:`: the template and image
 move together.
@@ -127,6 +127,7 @@ move together.
 | verifier rejects a mismatched `.ghuser` | ✅ same script |
 | core tests on Python 3.9; `uv version` + `uv build` give matching wheel versions | ✅ locally |
 | `sync_yak_feed.py`, `setup_lab_pip.py` | ✅ `tests/test_clients.py` against a fake GitLab API |
+| image builds unprivileged with kaniko, and that image passes the examples | ✅ locally, in an unprivileged container |
 | GitLab template | parses; **not yet run on git.rccn.dev** |
 | generated `.ghuser` / `.yak` load in Rhino 8 | ❌ **not yet tested in Rhino.** Do this before relying on it |
 | Rhino's pip honours the user pip config (scenario C) | ❌ to verify on one machine |
