@@ -1,0 +1,22 @@
+# Scenario C -- lab tool, core library NOT on public PyPI.
+#
+# On every push: test the core under Python 3.9 (Rhino 8), build + verify the .ghuser.
+# On a tag v1.2.3:
+#   - ringkit 1.2.3 goes to THIS project's PyPI-compatible Package Registry on git.rccn.dev
+#   - rccn-ringkit-1.2.3-rh8_0-any.yak goes to the generic Package Registry + a Release
+# Each component pins `# r: ringkit==1.2.3`, so library and components always match.
+#
+# Users: one-time pip setup pointing at the lab registry (docs/deploy-scenarios.md, C).
+#
+# Scenario B (open source) is the same file with GHUSER_PYPI: pypi and a masked
+# PYPI_TOKEN CI/CD variable; the `# r:` line then resolves from pypi.org.
+
+include:
+  - project: libs/ghuser-builder
+    ref: v1.0.0
+    file: templates/gitlab/ghuser.gitlab-ci.yml
+
+variables:
+  GHUSER_YAK_NAME: rccn-ringkit
+  GHUSER_CORE_DIR: "."
+  GHUSER_PYPI: gitlab

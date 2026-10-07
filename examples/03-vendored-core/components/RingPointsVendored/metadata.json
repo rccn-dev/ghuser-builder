@@ -1,0 +1,20 @@
+{
+    "name": "Ring Points (vendored)",
+    "nickname": "Ring",
+    "category": "RCCN Examples",
+    "subcategory": "Vendored",
+    "description": "Evenly spaced points on a circle. Logic lives in the ringkit library, shipped inside the .yak package itself (no registry needed).",
+    "exposure": 2,
+    "ghpython": {
+        "isAdvancedMode": true,
+        "iconDisplay": 0,
+        "inputParameters": [
+            {"name": "radius", "description": "Circle radius", "typeHintID": "float", "scriptParamAccess": 0},
+            {"name": "count", "description": "Number of points (3 or more)", "typeHintID": "int", "scriptParamAccess": 0},
+            {"name": "z", "description": "Height (default 0)", "typeHintID": "float", "optional": true, "scriptParamAccess": 0}
+        ],
+        "outputParameters": [
+            {"name": "points", "description": "Ring points"}
+        ]
+    }
+}

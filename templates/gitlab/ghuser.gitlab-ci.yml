@@ -1,0 +1,161 @@
+# ghuser-builder -- GitLab CI template for Grasshopper plugin projects.
+#
+#   include:
+#     - project: libs/ghuser-builder
+#       ref: v1.0.0                      # pin: the template and the image move together
+#       file: templates/gitlab/ghuser.gitlab-ci.yml
+#   variables:
+#     GHUSER_YAK_NAME: my-tool           # see the variables below
+#
+# Jobs (all overridable by redefining the job name in your .gitlab-ci.yml):
+#
+#   ghuser:build            every pipeline   build + verify .ghuser (+ .yak)       -> artifacts dist/
+#   core:test               GHUSER_CORE_DIR  pytest under Python 3.9 (Rhino 8's CPython)
+#   core:build              GHUSER_CORE_DIR  wheel + sdist, version = tag          -> artifacts dist/core/
+#   core:publish:gitlab     tag + GHUSER_PYPI=gitlab   wheel -> this project's PyPI registry
+#   core:publish:pypi       tag + GHUSER_PYPI=pypi     wheel -> pypi.org (masked PYPI_TOKEN)
+#   ghuser:publish          tag              .yak + .ghuser -> this project's generic package registry
+#   ghuser:release          tag              a GitLab Release linking to them
+#   .ghuser:yak-push        (hidden)         push the .yak to McNeel's public server; needs a
+#                                            Windows runner -- extend it to enable (scenario B)
+#
+# Uses only the default stages (build, test, deploy), so it composes with yours.
+# Release tags look like v1.2.3 (or v1.2.3-rc.1); the version is the tag minus "v".
+
+variables:
+  GHUSER_BUILDER_IMAGE: "${CI_REGISTRY}/libs/ghuser-builder:1.0.0"
+  GHUSER_UV_IMAGE: "ghcr.io/astral-sh/uv:0.12-python3.12-bookworm-slim"
+  GHUSER_COMPONENTS: components     # one folder per component: code.py + metadata.json + icon.png
+  GHUSER_PREFIX: ""                 # prepended to every component name
+  GHUSER_YAK_NAME: ""               # set to also package a .yak
+  GHUSER_YAK_INCLUDE: ""            # "SRC:DST ..." copied into the .yak (scenario D: vendored core)
+  GHUSER_CORE_DIR: ""               # folder with the core's pyproject.toml; empty = no core jobs
+  GHUSER_CORE_PYTHON: "3.9"         # what Rhino 8 embeds; test the core where it will run
+  GHUSER_PYPI: ""                   # where the core goes on a tag: gitlab | pypi | "" (nowhere)
+
+.ghuser:version: &ghuser_version
+  - |
+    if [ -n "${CI_COMMIT_TAG:-}" ]; then VERSION="${CI_COMMIT_TAG#v}"; else VERSION="0.0.0-dev.${CI_PIPELINE_IID}"; fi
+    PKG="${GHUSER_YAK_NAME:-$CI_PROJECT_NAME}"
+    echo "version=$VERSION package=$PKG"
+
+.ghuser:on-tag:
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
+
+ghuser:build:
+  stage: build
+  image: $GHUSER_BUILDER_IMAGE
+  script:
+    - ghuser-build "$GHUSER_COMPONENTS" dist
+  artifacts:
+    name: "$CI_PROJECT_NAME-$CI_COMMIT_REF_SLUG"
+    paths: [dist/]
+    expire_in: 30 days
+
+core:test:
+  stage: test
+  image: $GHUSER_UV_IMAGE
+  needs: []
+  rules:
+    - if: $GHUSER_CORE_DIR
+  variables:
+    UV_CACHE_DIR: "$CI_PROJECT_DIR/.uv-cache"
+  cache:
+    key: uv-$CI_PROJECT_ID
+    paths: [.uv-cache/]
+  script:
+    - cd "$GHUSER_CORE_DIR"
+    - uv run --python "$GHUSER_CORE_PYTHON" pytest -q
+
+core:build:
+  stage: build
+  image: $GHUSER_UV_IMAGE
+  rules:
+    - if: $GHUSER_CORE_DIR
+  script:
+    - *ghuser_version
+    - cd "$GHUSER_CORE_DIR"
+    - uv version --frozen "$VERSION"   # the wheel and the `# r: pkg=={{version}}` pins agree
+    - uv build --out-dir "$CI_PROJECT_DIR/dist/core"
+  artifacts:
+    paths: [dist/core/]
+    expire_in: 30 days
+
+core:publish:gitlab:
+  stage: deploy
+  image: $GHUSER_UV_IMAGE
+  needs: [core:test, core:build]
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/ && $GHUSER_CORE_DIR && $GHUSER_PYPI == "gitlab"
+  script:
+    - |
+      uv publish --publish-url "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/pypi" \
+                 --username gitlab-ci-token --password "$CI_JOB_TOKEN" dist/core/*
+
+core:publish:pypi:
+  stage: deploy
+  image: $GHUSER_UV_IMAGE
+  needs: [core:test, core:build]
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/ && $GHUSER_CORE_DIR && $GHUSER_PYPI == "pypi"
+  script:
+    - test -n "${PYPI_TOKEN:-}" || { echo "set a masked, protected CI/CD variable PYPI_TOKEN"; exit 1; }
+    - uv publish --token "$PYPI_TOKEN" dist/core/*
+
+ghuser:publish:
+  stage: deploy
+  image: $GHUSER_BUILDER_IMAGE
+  needs: [ghuser:build]
+  extends: .ghuser:on-tag
+  script:
+    - *ghuser_version
+    - BASE="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/${PKG}/${VERSION}"
+    - |
+      for f in dist/*.yak dist/ghuser/*.ghuser; do
+        [ -e "$f" ] || continue
+        curl --fail-with-body --silent --show-error --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+             --upload-file "$f" "$BASE/$(basename "$f")"
+        echo " uploaded $(basename "$f")"
+      done
+
+ghuser:release:
+  stage: deploy
+  image: $GHUSER_BUILDER_IMAGE
+  needs: [ghuser:build, ghuser:publish]
+  extends: .ghuser:on-tag
+  script:
+    - *ghuser_version
+    - export VERSION PKG
+    - |
+      python3 - <<'EOF' > release.json
+      import glob, json, os
+      v, pkg = os.environ["VERSION"], os.environ["PKG"]
+      api, pid = os.environ["CI_API_V4_URL"], os.environ["CI_PROJECT_ID"]
+      base = f"{api}/projects/{pid}/packages/generic/{pkg}/{v}"
+      files = sorted(glob.glob("dist/*.yak")) + sorted(glob.glob("dist/ghuser/*.ghuser"))
+      links = [{"name": os.path.basename(f), "url": f"{base}/{os.path.basename(f)}",
+                "link_type": "package"} for f in files]
+      notes = "Install: Rhino 8 > Package Manager, or see docs/deploy-scenarios.md in ghuser-builder."
+      print(json.dumps({"tag_name": os.environ["CI_COMMIT_TAG"], "name": f"{pkg} {v}",
+                        "description": notes, "assets": {"links": links}}))
+      EOF
+    - |
+      curl --fail-with-body --silent --show-error --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+           --header "Content-Type: application/json" --data @release.json \
+           "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases"
+
+# Scenario B: publish to McNeel's public package server (yak.rhino3d.com).
+# The yak CLI ships only for Windows/macOS, so this needs a Windows runner.
+# Enable in your project with:
+#   yak:push:
+#     extends: .ghuser:yak-push
+#     tags: [windows]
+# and a masked, protected variable YAK_TOKEN (from `yak login --ci` on any machine).
+.ghuser:yak-push:
+  stage: deploy
+  needs: [ghuser:build]
+  extends: .ghuser:on-tag
+  script:
+    - Invoke-WebRequest https://files.mcneel.com/yak/tools/latest/yak.exe -OutFile yak.exe
+    - Get-ChildItem dist\*.yak | ForEach-Object { .\yak.exe push $_.FullName }

@@ -1,0 +1,11 @@
+# Scenario A -- components only, no Python library behind them.
+# Every tag v* builds, verifies, packages rccn-spiral-<version>-rh8_0-any.yak and
+# publishes it to this project's Package Registry + a GitLab Release.
+
+include:
+  - project: libs/ghuser-builder
+    ref: v1.0.0
+    file: templates/gitlab/ghuser.gitlab-ci.yml
+
+variables:
+  GHUSER_YAK_NAME: rccn-spiral

@@ -1,0 +1,7 @@
+{
+    "authors": ["RACCOON Lab, NCKU Architecture"],
+    "description": "Example: Grasshopper components backed by the ringkit Python library.",
+    "url": "https://git.rccn.dev/libs/ghuser-builder",
+    "keywords": ["rccn", "example"],
+    "icon": "icon.png"
+}

@@ -1,0 +1,6 @@
+{
+    "authors": ["RACCOON Lab, NCKU Architecture"],
+    "description": "Example: a self-contained Grasshopper component packaged by ghuser-builder.",
+    "url": "https://git.rccn.dev/libs/ghuser-builder",
+    "keywords": ["rccn", "example"]
+}

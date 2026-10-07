@@ -1,0 +1,15 @@
+[project]
+name = "ringkit"
+# Placeholder: CI sets this from the git tag (uv version), so the library and the
+# components that pin `ringkit=={{version}}` are always released together.
+version = "0.0.0"
+description = "Example core library for a Grasshopper plugin built with ghuser-builder"
+requires-python = ">=3.9"   # Rhino 8 embeds CPython 3.9
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

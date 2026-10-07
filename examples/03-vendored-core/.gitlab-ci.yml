@@ -1,0 +1,15 @@
+# Scenario D -- lab tool, no package registry at all.
+#
+# The pure-Python core is copied into the .yak (lib/ringkit), and each component
+# adds that folder to sys.path. One file to hand out; nothing for users to configure.
+# Works only for pure-Python cores (no compiled extensions), and any public
+# dependency (e.g. compas) still comes from a `# r:` line.
+
+include:
+  - project: libs/ghuser-builder
+    ref: v1.0.0
+    file: templates/gitlab/ghuser.gitlab-ci.yml
+
+variables:
+  GHUSER_YAK_NAME: rccn-ringkit-vendored
+  GHUSER_YAK_INCLUDE: "src/ringkit:lib/ringkit"

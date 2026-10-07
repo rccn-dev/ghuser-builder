@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Run ghuser-build on this machine, in the same image CI uses.
+# Copy into a project (e.g. scripts/ghuser) and run from the project root:
+#
+#   scripts/ghuser                         # components/ -> dist/, dev version
+#   scripts/ghuser --yak my-tool           # ...and a .yak
+#   GHUSER_VERSION=1.2.3 scripts/ghuser --yak my-tool
+#
+# Any ghuser-build option passes through. Needs Docker (Desktop, OrbStack, colima).
+set -euo pipefail
+IMAGE="${GHUSER_BUILDER_IMAGE:-git.rccn.dev:5050/libs/ghuser-builder:1.0.0}"
+exec docker run --rm \
+  -v "$PWD:/work" -w /work \
+  -u "$(id -u):$(id -g)" -e HOME=/tmp \
+  -e GHUSER_VERSION -e GHUSER_PREFIX -e GHUSER_YAK_NAME -e GHUSER_YAK_INCLUDE \
+  "$IMAGE" ghuser-build "$@" "${GHUSER_COMPONENTS:-components}" "${GHUSER_OUT:-dist}"

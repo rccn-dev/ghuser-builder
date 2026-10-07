@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# ghuser-build: componentize -> verify -> (optionally) package as .yak
+#
+#   ghuser-build [options] <components-dir> <out-dir>
+#
+# Options (each also settable by the environment variable in brackets):
+#   --version X.Y.Z       substituted for {{version}} in code.py; default from the     [GHUSER_VERSION]
+#                         git tag (CI_COMMIT_TAG / GITHUB_REF_NAME, leading "v" dropped)
+#   --prefix TEXT         prepended to every component name                            [GHUSER_PREFIX]
+#   --yak NAME            also write NAME-VERSION-<dist>.yak into <out-dir>            [GHUSER_YAK_NAME]
+#   --yak-manifest FILE   fields for manifest.yml (default: ./yak.json if present)     [GHUSER_YAK_MANIFEST]
+#   --yak-include SRC:DST copy SRC into the package at DST; repeatable                [GHUSER_YAK_INCLUDE, space-separated]
+#
+# Output: <out-dir>/ghuser/*.ghuser, plus <out-dir>/*.yak with --yak.
+# Exit code is non-zero if packaging or verification fails; nothing is half-written
+# into <out-dir> in that case.
+set -euo pipefail
+
+TOOLS=/opt/ghuser-builder/tools
+VERSION="${GHUSER_VERSION:-}"
+PREFIX="${GHUSER_PREFIX:-}"
+YAK="${GHUSER_YAK_NAME:-}"
+MANIFEST="${GHUSER_YAK_MANIFEST:-}"
+read -r -a INCLUDES <<< "${GHUSER_YAK_INCLUDE:-}"
+
+usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }
+
+ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --version) VERSION="$2"; shift 2 ;;
+    --prefix) PREFIX="$2"; shift 2 ;;
+    --yak) YAK="$2"; shift 2 ;;
+    --yak-manifest) MANIFEST="$2"; shift 2 ;;
+    --yak-include) INCLUDES+=("$2"); shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "ghuser-build: unknown option $1" >&2; exit 2 ;;
+    *) ARGS+=("$1"); shift ;;
+  esac
+done
+[[ ${#ARGS[@]} -eq 2 ]] || { usage >&2; exit 2; }
+SRC="${ARGS[0]}"; OUT="${ARGS[1]}"
+
+[[ -d "$SRC" ]] || { echo "no components directory: $SRC" >&2; exit 2; }
+
+if [[ -z "$VERSION" ]]; then
+  TAG="${CI_COMMIT_TAG:-}"
+  [[ -z "$TAG" && "${GITHUB_REF_TYPE:-}" == tag ]] && TAG="${GITHUB_REF_NAME:-}"
+  if [[ -n "$TAG" ]]; then
+    VERSION="${TAG#v}"
+  else
+    # Not a release: a pre-release that sorts below every real one. Numeric, so
+    # it is valid both as semver (Yak) and PEP 440 (pip reads it as 0.0.0.devN).
+    VERSION="0.0.0-dev.${CI_PIPELINE_IID:-${GITHUB_RUN_NUMBER:-0}}"
+  fi
+fi
+[[ -z "$MANIFEST" && -f yak.json ]] && MANIFEST=yak.json
+
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
+
+echo "ghuser-build  version=$VERSION  GH_IO=${GHUSER_GH_VERSION:-?}  componentizer=${GHUSER_COMPONENTIZER_SHA:0:7}"
+
+PREFIX_ARGS=()
+[[ -n "$PREFIX" ]] && PREFIX_ARGS=(--prefix "$PREFIX")
+
+python3 /opt/componentizer/componentize_cpy.py --ghio /opt/ghio \
+  --version "$VERSION" "${PREFIX_ARGS[@]}" "$SRC" "$STAGE/ghuser"
+
+# The image does not trust its own output: read every file back with GH_IO.
+python3 "$TOOLS/verify_ghuser.py" --version "$VERSION" \
+  "${PREFIX_ARGS[@]}" "$SRC" "$STAGE/ghuser"
+
+if [[ -n "$YAK" ]]; then
+  YAK_ARGS=(--name "$YAK" --version "$VERSION")
+  [[ -n "$MANIFEST" ]] && YAK_ARGS+=(--manifest "$MANIFEST")
+  for inc in "${INCLUDES[@]}"; do YAK_ARGS+=(--include "$inc"); done
+  python3 "$TOOLS/make_yak.py" "${YAK_ARGS[@]}" "$STAGE/ghuser" "$STAGE"
+fi
+
+mkdir -p "$OUT"
+rm -rf "$OUT/ghuser"
+cp -r "$STAGE/ghuser" "$OUT/ghuser"
+cp "$STAGE"/*.yak "$OUT/" 2>/dev/null || true
+echo "ghuser-build  wrote:"
+for f in "$OUT"/ghuser/*.ghuser "$OUT"/*.yak; do
+  [[ -e "$f" ]] && echo "  ${f#"$OUT"/}"
+done
+exit 0

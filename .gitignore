@@ -1,0 +1,9 @@
+dist/
+dist-*/
+__pycache__/
+*.pyc
+.venv/
+.uv-cache/
+*.egg-info/
+uv.lock
+.DS_Store
