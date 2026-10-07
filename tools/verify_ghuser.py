@@ -13,11 +13,14 @@ import json
 import os
 import sys
 
-import clr
+# Set by use_ghio(): the image loads GH_IO from /opt/ghio, local/ghuser_dev.py
+# from the installed Rhino.
+System = GH_LooseChunk = None
 
-clr.AddReference("/opt/ghio/GH_IO")
-import System  # noqa: E402
-from GH_IO.Serialization import GH_LooseChunk  # noqa: E402
+
+def use_ghio(system_module, loose_chunk_type):
+    global System, GH_LooseChunk
+    System, GH_LooseChunk = system_module, loose_chunk_type
 
 
 def load(path):
@@ -32,11 +35,11 @@ def count(chunk, name):
     return sum(1 for i in range(chunk.ChunkCount) if chunk.Chunks[i].Name == name)
 
 
-def expected_code(code, version, name, ghuser_name):
-    # Mirrors replace_templates() in the componentizer.
+def expected_code(code, version, name, ghuser_name, header=""):
+    # Mirrors replace_templates() in the componentizer (+ a dev build's header).
     if version:
         code = code.replace("{{version}}", version)
-    return code.replace("{{name}}", name).replace("{{ghuser_name}}", ghuser_name)
+    return header + code.replace("{{name}}", name).replace("{{ghuser_name}}", ghuser_name)
 
 
 def embedded_code(inner):
@@ -44,7 +47,7 @@ def embedded_code(inner):
     return base64.b64decode(inner.FindChunk("Script").GetString("Text")).decode("utf-8")
 
 
-def check(source_dir, build_dir, version, prefix):
+def check(source_dir, build_dir, version, prefix, header="", canvas_icon=True):
     folder = os.path.basename(source_dir)
     meta = json.load(open(os.path.join(source_dir, "metadata.json"), encoding="utf-8"))
     code = open(os.path.join(source_dir, "code.py"), encoding="utf-8").read()
@@ -60,8 +63,10 @@ def check(source_dir, build_dir, version, prefix):
         problems.append(f"{folder}: name {root.GetString('Name')!r} != {want_name!r}")
     if root.GetString("Description") != meta.get("description", ""):
         problems.append(f"{folder}: description differs from metadata.json")
-    if embedded_code(inner) != expected_code(code, version, meta["name"], ghuser):
+    if embedded_code(inner) != expected_code(code, version, meta["name"], ghuser, header):
         problems.append(f"{folder}: embedded code differs from code.py")
+    if canvas_icon and inner.FindItem("IconOverride") is None:
+        problems.append(f"{folder}: no canvas icon (IconOverride)")
 
     params = inner.FindChunk("ParameterData")
     gh = meta.get("ghpython", {})
@@ -72,25 +77,35 @@ def check(source_dir, build_dir, version, prefix):
     return problems
 
 
+def verify_all(src, out, version, prefix="", header="", canvas_icon=True):
+    bundles = sorted(
+        d for d in os.listdir(src)
+        if os.path.isdir(os.path.join(src, d)) and d not in ("__pycache__", ".git")
+    )
+    if not bundles:
+        print(f"[FAILED]   no component folders in {src}")
+        return False
+    problems = [p for d in bundles for p in check(os.path.join(src, d), out, version, prefix, header, canvas_icon)]
+    for d in bundles:
+        if not any(p.startswith(d + ":") for p in problems):
+            print(f"[verified] {d}.ghuser")
+    for p in problems:
+        print(f"[FAILED]   {p}")
+    return not problems
+
+
 if __name__ == "__main__":
+    import clr
+
+    clr.AddReference("/opt/ghio/GH_IO")
+    import System as _System
+    from GH_IO.Serialization import GH_LooseChunk as _GH_LooseChunk
+
+    use_ghio(_System, _GH_LooseChunk)
     ap = argparse.ArgumentParser()
     ap.add_argument("src")
     ap.add_argument("out")
     ap.add_argument("--version", default=None)
     ap.add_argument("--prefix", default="")
     a = ap.parse_args()
-
-    bundles = sorted(
-        d for d in os.listdir(a.src)
-        if os.path.isdir(os.path.join(a.src, d)) and d not in ("__pycache__", ".git")
-    )
-    if not bundles:
-        print(f"[FAILED]   no component folders in {a.src}")
-        sys.exit(1)
-    problems = [p for d in bundles for p in check(os.path.join(a.src, d), a.out, a.version, a.prefix)]
-    for d in bundles:
-        if not any(p.startswith(d + ":") for p in problems):
-            print(f"[verified] {d}.ghuser")
-    for p in problems:
-        print(f"[FAILED]   {p}")
-    sys.exit(1 if problems else 0)
+    sys.exit(0 if verify_all(a.src, a.out, a.version, a.prefix) else 1)

@@ -55,6 +55,19 @@ It runs `docker run` with the project folder mounted. Where mounting is not poss
 (`act` on macOS, some Docker-in-Docker setups), [`templates/local/Dockerfile`](templates/local/Dockerfile)
 builds the same thing and exports it through BuildKit.
 
+### Dev builds on a Mac with Rhino 8 (no Docker)
+
+```bash
+uv run <ghuser-builder>/local/ghuser_dev.py components dist-dev --env src
+```
+
+Runs the same pinned componentizer on **Rhino 8's own .NET and GH_IO**, so files
+match the Rhino you load them in. `--env src` adds `# env: <abs path>` to each
+component: Rhino then imports your core library straight from the working copy, so
+you edit and recompute without reinstalling. **Dev only:** no canvas icon (Rhino's
+macOS `System.Drawing` cannot create bitmaps outside Rhino), no `.yak`, version
+`0.0.0-dev.local`. Releases always come from CI.
+
 ### In a GitHub project
 
 [`templates/github/build-ghuser.yml`](templates/github/build-ghuser.yml): the same
@@ -111,10 +124,32 @@ The image tag names one exact toolchain, recorded as image labels:
 | `pythonnet` | hosts Mono from Python | `Dockerfile` |
 
 To release a new image: bump a pin, set the template's `GHUSER_BUILDER_IMAGE` to the
-new version, then tag `vX.Y.Z`. CI builds the image with kaniko (no Docker daemon,
-no privileged runner), tests it on the examples, and copies the tested image to
-`$CI_REGISTRY_IMAGE:X.Y.Z` with crane. CI refuses a tag that doesn't match the
-template.
+new version, then tag `vX.Y.Z`. CI builds the image with BuildKit, tests it on the
+examples, and copies exactly the tested image to `$CI_REGISTRY_IMAGE:X.Y.Z` with
+crane. CI refuses a tag that doesn't match the template.
+
+### Runner for image builds
+
+Only the `image:build` job needs more than an ordinary runner. Rootless BuildKit
+needs Linux user namespaces, which Docker's default seccomp/AppArmor profiles block.
+An admin registers **one extra runner**, tagged `image-build` and used only by
+jobs that ask for it:
+
+```toml
+# /etc/gitlab-runner/config.toml, a second [[runners]] entry (docker executor)
+[[runners]]
+  name = "rccn-image-build"
+  executor = "docker"
+  [runners.docker]
+    image = "alpine:3.20"
+    privileged = false
+    security_opt = ["seccomp=unconfined", "apparmor=unconfined"]
+```
+
+Register it with `--tag-list image-build` and **"Run untagged jobs" off**, so
+ordinary jobs never land on it. Limit it to this project or group. `privileged =
+true` also works but grants far more than BuildKit needs. To use a different tag,
+set the CI/CD variable `IMAGE_BUILD_RUNNER_TAG`.
 
 Projects upgrade by changing `ref:` in their `include:`: the template and image
 move together.
@@ -124,10 +159,12 @@ move together.
 | Claim | Checked |
 | --- | --- |
 | image builds (arm64, Docker 27); examples build, verify and package | ✅ `tests/run_examples.sh` |
-| verifier rejects a mismatched `.ghuser` | ✅ same script |
+| verifier rejects a mismatched `.ghuser`, and one without a canvas icon | ✅ same script |
+| `local/ghuser_dev.py` with Rhino 8.35 on macOS (arm64) | ✅ example 02 with `--env src` |
 | core tests on Python 3.9; `uv version` + `uv build` give matching wheel versions | ✅ locally |
 | `sync_yak_feed.py`, `setup_lab_pip.py` | ✅ `tests/test_clients.py` against a fake GitLab API |
-| image builds unprivileged with kaniko, and that image passes the examples | ✅ locally, in an unprivileged container |
+| image builds with rootless BuildKit under the `image-build` runner's settings (seccomp/AppArmor unconfined, not privileged) | ✅ locally, same container settings |
+| BuildKit's push to the GitLab registry | ❓ not yet: first run on the new runner |
 | GitLab template | parses; **not yet run on git.rccn.dev** |
 | generated `.ghuser` / `.yak` load in Rhino 8 | ❌ **not yet tested in Rhino.** Do this before relying on it |
 | Rhino's pip honours the user pip config (scenario C) | ❌ to verify on one machine |
