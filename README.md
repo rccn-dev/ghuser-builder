@@ -122,6 +122,7 @@ The image tag names one exact toolchain, recorded as image labels:
 | `GH_VERSION` (GH_IO.dll) | a `.ghuser` written by a newer GH_IO than the user's Rhino won't load | `Dockerfile` |
 | `COMPONENTIZER_SHA` | the file format the componentizer writes | `Dockerfile` |
 | `pythonnet` | hosts Mono from Python | `Dockerfile` |
+| base image digest | reproducible builds; CI's layer cache stays valid until you bump it | `Dockerfile` `FROM` |
 
 To release a new image: bump a pin, set the template's `GHUSER_BUILDER_IMAGE` to the
 new version, then tag `vX.Y.Z`. CI builds the image with BuildKit, tests it on the

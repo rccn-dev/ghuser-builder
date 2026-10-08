@@ -132,6 +132,18 @@ A good `image:build` log ends with `pushing manifest for …:sha-<commit>`. Then
 | `unauthorized` / `denied` when pushing | registry login | Container Registry enabled for the project? (Settings → General → Visibility) |
 | `could not resolve host git.rccn.dev` | the new entry lacks the old runner's network settings | step 3, "copy them over" |
 
+## Build cache
+
+`image:build` exports every layer to `$CI_REGISTRY_IMAGE/buildcache:latest`
+and imports it on the next run, so only changed layers are rebuilt. The
+apt-get layer (most of a cold build) is reused until the `FROM` digest or the
+apt line in the Dockerfile changes. The first build after a change is still
+cold.
+
+If the project has a **container registry cleanup policy**, exclude the
+`buildcache` repository (or the `latest` tag in it). Otherwise every build after
+a cleanup is cold again.
+
 ## Why not the alternatives
 
 - **Privileged Docker-in-Docker on the default runner:** every job on that runner,

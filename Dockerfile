@@ -9,7 +9,10 @@
 # Everything that decides whether a .ghuser loads in a user's Rhino is pinned
 # here and recorded as an image label, so an image tag names one exact toolchain.
 
-FROM debian:bookworm-slim
+# Pinned by digest: the build is reproducible, and CI's layer cache stays valid
+# until this line changes. Bump deliberately (README, "What is pinned"):
+#   docker buildx imagetools inspect debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
 
 # mono-devel, not mono-runtime: pythonnet needs the netstandard facade, which
 # Debian ships only in mono-devel. libmonosgen is the runtime pythonnet hosts.

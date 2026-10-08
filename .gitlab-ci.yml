@@ -11,6 +11,7 @@ stages: [build, test, release]
 
 variables:
   CANDIDATE: "$CI_REGISTRY_IMAGE:sha-$CI_COMMIT_SHORT_SHA"
+  BUILD_CACHE: "$CI_REGISTRY_IMAGE/buildcache:latest"
   IMAGE_BUILD_RUNNER_TAG: image-build
 
 image:build:
@@ -26,8 +27,12 @@ image:build:
     - |
       AUTH=$(printf '%s:%s' "$CI_REGISTRY_USER" "$CI_REGISTRY_PASSWORD" | base64 | tr -d '\n')
       printf '{"auths":{"%s":{"auth":"%s"}}}' "$CI_REGISTRY" "$AUTH" > ~/.docker/config.json
+    # Every layer goes to the registry as cache (mode=max) and comes back on the
+    # next build: unchanged layers -- above all the apt-get layer -- are reused.
     - buildctl-daemonless.sh build --frontend dockerfile.v0
         --local context=. --local dockerfile=.
+        --import-cache "type=registry,ref=$BUILD_CACHE"
+        --export-cache "type=registry,ref=$BUILD_CACHE,mode=max,image-manifest=true,oci-mediatypes=true"
         --output "type=image,name=$CANDIDATE,push=true"
 
 test:examples:
