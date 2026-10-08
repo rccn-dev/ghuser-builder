@@ -5,7 +5,7 @@
 # runner that allows user namespaces: seccomp and AppArmor unconfined (or
 # privileged). Only image:build needs it, so it runs on a runner tagged
 # $IMAGE_BUILD_RUNNER_TAG; every other job runs on the ordinary runners.
-# Runner setup: README, "Runner for image builds".
+# Runner setup: docs/runner-setup.md.
 
 stages: [build, test, release]
 

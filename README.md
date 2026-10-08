@@ -130,26 +130,9 @@ crane. CI refuses a tag that doesn't match the template.
 
 ### Runner for image builds
 
-Only the `image:build` job needs more than an ordinary runner. Rootless BuildKit
-needs Linux user namespaces, which Docker's default seccomp/AppArmor profiles block.
-An admin registers **one extra runner**, tagged `image-build` and used only by
-jobs that ask for it:
-
-```toml
-# /etc/gitlab-runner/config.toml, a second [[runners]] entry (docker executor)
-[[runners]]
-  name = "rccn-image-build"
-  executor = "docker"
-  [runners.docker]
-    image = "alpine:3.20"
-    privileged = false
-    security_opt = ["seccomp=unconfined", "apparmor=unconfined"]
-```
-
-Register it with `--tag-list image-build` and **"Run untagged jobs" off**, so
-ordinary jobs never land on it. Limit it to this project or group. `privileged =
-true` also works but grants far more than BuildKit needs. To use a different tag,
-set the CI/CD variable `IMAGE_BUILD_RUNNER_TAG`.
+Only the `image:build` job needs more than an ordinary runner: one extra runner,
+tagged `image-build`, with seccomp/AppArmor relaxed (not privileged). Step-by-step
+setup and troubleshooting: **[docs/runner-setup.md](docs/runner-setup.md)**.
 
 Projects upgrade by changing `ref:` in their `include:`: the template and image
 move together.
