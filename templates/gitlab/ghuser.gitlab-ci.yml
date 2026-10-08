@@ -24,7 +24,7 @@
 
 variables:
   GHUSER_BUILDER_IMAGE: "${CI_REGISTRY}/libs/ghuser-builder:1.0.0"
-  GHUSER_UV_IMAGE: "ghcr.io/astral-sh/uv:0.12-python3.12-bookworm-slim"
+  GHUSER_UV_IMAGE: "ghcr.io/astral-sh/uv:0.12.23-python3.12-trixie-slim"
   GHUSER_COMPONENTS: components     # one folder per component: code.py + metadata.json + icon.png
   GHUSER_PREFIX: ""                 # prepended to every component name
   GHUSER_YAK_NAME: ""               # set to also package a .yak
