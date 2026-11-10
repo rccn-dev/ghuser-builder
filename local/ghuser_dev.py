@@ -16,7 +16,7 @@ and GH_IO.dll, so the files match exactly the Rhino you will load them in.
 build      componentize and verify into OUT, replacing what was there.
 deploy     build, then link OUT into Grasshopper's User Object folder as NAME
            (default: <current folder>-dev). Loose copies of the same components
-           elsewhere in that folder are moved to UserObjects-backup/<time>/, so
+           elsewhere in that folder move to ~/.cache/ghuser-builder/backups/<time>/, so
            Grasshopper loads one of each. Then checks, in Rhino's own Python, the
            `# r:` requirements and that what the components import imports; with
            Rhino running, drops modules loaded from --env and recomputes the
@@ -41,7 +41,7 @@ DEV ONLY, by design:
   * `# env:` paths only exist on this machine.
 Releases come from CI (ghuser-build in the Linux image), which has full icons.
 
-GHUSER_USEROBJECTS overrides the User Object folder (tests use it).
+GHUSER_USEROBJECTS and GHUSER_BACKUPS override the User Object and backup folders (tests use them).
 """
 
 import argparse
@@ -245,8 +245,9 @@ def ghuser_files(uo, follow):
 
 
 def backup(uo, paths):
-    """Move paths (inside uo) to UserObjects-backup/<time>/, keeping where they were; drop emptied folders."""
-    root = os.path.join(os.path.dirname(uo), "UserObjects-backup", time.strftime("%Y%m%d-%H%M%S"))
+    """Move paths (inside uo) to the backups folder, under <time>/ and where they were; drop emptied folders."""
+    backups = os.environ.get("GHUSER_BACKUPS") or os.path.expanduser("~/.cache/ghuser-builder/backups")
+    root = os.path.join(backups, time.strftime("%Y%m%d-%H%M%S"))
     for p in paths:
         dest = os.path.join(root, os.path.relpath(p, uo))
         os.makedirs(os.path.dirname(dest), exist_ok=True)
