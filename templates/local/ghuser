@@ -8,7 +8,7 @@
 #
 # Any ghuser-build option passes through. Needs Docker (Desktop, OrbStack, colima).
 set -euo pipefail
-IMAGE="${GHUSER_BUILDER_IMAGE:-git.rccn.dev:5050/libs/ghuser-builder:1.0.0}"
+IMAGE="${GHUSER_BUILDER_IMAGE:-registry.rccn.dev/libs/ghuser-builder:1.0.0}"
 exec docker run --rm \
   -v "$PWD:/work" -w /work \
   -u "$(id -u):$(id -g)" -e HOME=/tmp \

@@ -169,4 +169,4 @@ move together.
 | generated `.ghuser` / `.yak` load in Rhino 8 | ❌ **not yet tested in Rhino.** Do this before relying on it |
 | Rhino's pip honours the user pip config (scenario C) | ❌ to verify on one machine |
 | Rhino 8 accepts a folder as a package source; package install path (scenario D) | ❌ to verify on Windows and macOS |
-| registry host `git.rccn.dev:5050` in `templates/local/*` | ❓ placeholder: replace with the lab's registry address |
+| `registry.rccn.dev/libs/ghuser-builder:1.0.0` in `templates/local/*` | ❓ not published yet: no `v1.0.0` tag, so the release job has not run |
