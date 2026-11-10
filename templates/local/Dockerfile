@@ -6,7 +6,7 @@
 #
 # Copy to the project root as Dockerfile.ghuser; set the image to the version you pin.
 
-FROM git.rccn.dev:5050/libs/ghuser-builder:1.0.0 AS build
+FROM registry.rccn.dev/libs/ghuser-builder:1.0.0 AS build
 ARG GHUSER_VERSION=""
 ARG GHUSER_YAK_NAME=""
 COPY . /work

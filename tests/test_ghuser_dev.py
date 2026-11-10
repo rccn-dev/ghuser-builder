@@ -46,7 +46,8 @@ def test_imported_modules_finds_imports_inside_functions_and_skips_rhino_and_std
 
 
 @pytest.fixture
-def uo(tmp_path):
+def uo(tmp_path, monkeypatch):
+    monkeypatch.setenv("GHUSER_BACKUPS", str(tmp_path / "backups"))
     folder = tmp_path / "UserObjects"
     folder.mkdir()
     return folder
@@ -76,7 +77,7 @@ def test_link_backs_up_loose_copies_and_only_warns_about_other_checkouts(tmp_pat
     assert not (uo / "old").exists()  # emptied, so removed
     assert (uo / "Unrelated.ghuser").exists()
     assert (other / "B.ghuser").read_text() == "theirs"
-    backups = list((tmp_path / "UserObjects-backup").iterdir())
+    backups = list((tmp_path / "backups").iterdir())
     assert (backups[0] / "old" / "A.ghuser").read_text() == "old"
     assert any("WARNING B.ghuser" in n for n in notes)
 
