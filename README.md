@@ -58,15 +58,28 @@ builds the same thing and exports it through BuildKit.
 ### Dev builds on a Mac with Rhino 8 (no Docker)
 
 ```bash
-uv run <ghuser-builder>/local/ghuser_dev.py components dist-dev --env src
+uv run <ghuser-builder>/local/ghuser_dev.py deploy components dist-dev --env src
+uv run <ghuser-builder>/local/ghuser_dev.py build components dist-dev --env src   # build only
+uv run <ghuser-builder>/local/ghuser_dev.py status dist-dev
+uv run <ghuser-builder>/local/ghuser_dev.py uninstall dist-dev
 ```
 
 Runs the same pinned componentizer on **Rhino 8's own .NET and GH_IO**, so files
 match the Rhino you load them in. `--env src` adds `# env: <abs path>` to each
 component: Rhino then imports your core library straight from the working copy, so
-you edit and recompute without reinstalling. **Dev only:** no canvas icon (Rhino's
-macOS `System.Drawing` cannot create bitmaps outside Rhino), no `.yak`, version
-`0.0.0-dev.local`. Releases always come from CI.
+you edit and recompute without reinstalling. A `# r: core=={{version}}` pin is left
+out of such a build, since `--env` provides that library.
+
+`deploy` builds, links `dist-dev` into Grasshopper's User Object folder as
+`<folder>-dev` (`--name` to choose), and moves loose older copies of the same
+components to `UserObjects-backup/`. It then checks the `# r:` requirements and the
+components' imports in Rhino's own Python (`--requirements` installs what is
+missing), and if Rhino is running, drops modules loaded from `--env`, recomputes
+the components on the canvas and names any that carry older code (`--no-reload`
+to skip). `status` says what Grasshopper will load and what collides.
+
+**Dev only:** no canvas icon (Rhino's macOS `System.Drawing` cannot create bitmaps
+outside Rhino), no `.yak`, version `0.0.0-dev.local`. Releases always come from CI.
 
 ### In a GitHub project
 
@@ -144,7 +157,10 @@ move together.
 | --- | --- |
 | image builds (arm64, Docker 27); examples build, verify and package | ✅ `tests/run_examples.sh` |
 | verifier rejects a mismatched `.ghuser`, and one without a canvas icon | ✅ same script |
-| `local/ghuser_dev.py` with Rhino 8.35 on macOS (arm64) | ✅ example 02 with `--env src` |
+| `local/ghuser_dev.py` with Rhino 8.36 (.NET 10) on macOS (arm64) | ✅ example 02 with `--env src` |
+| `ghuser_dev.py deploy` reload: drops `--env` modules, recomputes, flags stale canvas code | ✅ example 02 in a running Rhino 8.36 |
+| `ghuser_dev.py` link, backup, status, uninstall | ✅ `tests/test_ghuser_dev.py` |
+| Grasshopper loads user objects through a symlinked folder | ❓ not yet checked by restarting Grasshopper |
 | core tests on Python 3.9; `uv version` + `uv build` give matching wheel versions | ✅ locally |
 | `sync_yak_feed.py`, `setup_lab_pip.py` | ✅ `tests/test_clients.py` against a fake GitLab API |
 | image builds with rootless BuildKit under the `image-build` runner's settings (seccomp/AppArmor unconfined, not privileged) | ✅ locally, same container settings |
