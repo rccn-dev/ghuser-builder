@@ -194,7 +194,7 @@ The dev-loop scenarios run headless and in Docker on every push, and in Rhino by
 
 | Claim | Checked |
 | --- | --- |
-| dev-loop scenarios (`tests/scenarios.py`: core, `code.py`, metadata, icon, added, removed, renamed, moved, upgraded, uninstalled) | ✅ headless (`tests/test_dev_scenarios.py`); ✅ Docker, arm64 (colima); ✅ Rhino 8.37, macOS (`tests/rhino/run_scenarios.py`), 2026-11-17; ❓ Windows; ❓ amd64 Docker until the GitHub `tests` workflow runs |
+| dev-loop scenarios (`tests/scenarios.py`: core, `code.py`, metadata, icon, added, removed, renamed, moved, upgraded, uninstalled) | ✅ headless (`tests/test_dev_scenarios.py`); ✅ Docker, arm64 (colima); ✅ Docker, amd64 (GitHub); ✅ headless on Windows and macOS (GitHub); ✅ Rhino 8.37, macOS (`tests/rhino/run_scenarios.py`), 2026-11-17; ❓ Rhino on Windows |
 | a component whose top level fails (its `src/` gone) keeps its `dev:` label | ✅ Rhino 8.37, macOS |
 | image builds (arm64, Docker 27); examples build, verify and package | ✅ `tests/run_examples.sh` |
 | verifier rejects a mismatched `.ghuser`, and one without a canvas icon | ✅ same script |
