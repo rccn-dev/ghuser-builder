@@ -20,7 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uv run --no-project --python 3.12 --with pytest pytest -q tests
+      # Failures become annotations, readable without logging in.
+      - run: uv run --no-project --python 3.12 --with pytest --with pytest-github-actions-annotate-failures pytest -q tests
 
   docker:
     runs-on: ubuntu-latest
@@ -28,6 +29,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - run: docker build -t ghuser-builder:ci .
-      - run: uv run --no-project --python 3.12 --with pytest pytest -q tests/test_dev_scenarios.py
+      - run: uv run --no-project --python 3.12 --with pytest --with pytest-github-actions-annotate-failures pytest -q tests/test_dev_scenarios.py
         env:
           GHUSER_TEST_IMAGE: ghuser-builder:ci

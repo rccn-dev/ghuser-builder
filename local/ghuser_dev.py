@@ -304,7 +304,11 @@ def build(src, out, env=None, prefix="", builder=None, image=None):
         with open(os.path.join(out, STAMPS), "w", encoding="utf-8") as f:
             json.dump(prints, f, indent=1, sort_keys=True)
 
-    print(f"ghuser_dev: wrote {os.path.relpath(out)}/ (dev build with {builder}: version {VERSION}"
+    try:
+        shown = os.path.relpath(out)
+    except ValueError:  # Windows: out is on another drive than the current folder
+        shown = out
+    print(f"ghuser_dev: wrote {shown}/ (dev build with {builder}: version {VERSION}"
           + (", no canvas icon" if builder == "rhino" else "")
           + (f", imports from {env})" if env else ")"))
     for d, note in changes(before, prints):
