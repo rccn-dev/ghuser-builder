@@ -6,9 +6,12 @@
 #   scripts/ghuser --yak my-tool           # ...and a .yak
 #   GHUSER_VERSION=1.2.3 scripts/ghuser --yak my-tool
 #
-# Any ghuser-build option passes through. Needs Docker (Desktop, OrbStack, colima).
+# Any ghuser-build option passes through. Needs Docker (Desktop, OrbStack, colima)
+# and the image: `docker build -t ghuser-builder:local <ghuser-builder>` once, or
+# GHUSER_BUILDER_IMAGE=registry.rccn.dev/libs/ghuser-builder:1.1.0 with a lab login.
+# ghuser.py beside it does the same on Windows.
 set -euo pipefail
-IMAGE="${GHUSER_BUILDER_IMAGE:-registry.rccn.dev/libs/ghuser-builder:1.0.0}"
+IMAGE="${GHUSER_BUILDER_IMAGE:-ghuser-builder:local}"
 exec docker run --rm \
   -v "$PWD:/work" -w /work \
   -u "$(id -u):$(id -g)" -e HOME=/tmp \

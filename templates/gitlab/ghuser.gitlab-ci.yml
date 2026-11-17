@@ -2,7 +2,7 @@
 #
 #   include:
 #     - project: libs/ghuser-builder
-#       ref: v1.0.0                      # pin: the template and the image move together
+#       ref: v1.1.0                      # pin: the template and the image move together
 #       file: templates/gitlab/ghuser.gitlab-ci.yml
 #   variables:
 #     GHUSER_YAK_NAME: my-tool           # see the variables below
@@ -23,7 +23,7 @@
 # Release tags look like v1.2.3 (or v1.2.3-rc.1); the version is the tag minus "v".
 
 variables:
-  GHUSER_BUILDER_IMAGE: "${CI_REGISTRY}/libs/ghuser-builder:1.0.0"
+  GHUSER_BUILDER_IMAGE: "${CI_REGISTRY}/libs/ghuser-builder:1.1.0"
   GHUSER_UV_IMAGE: "ghcr.io/astral-sh/uv:0.12.23-python3.12-trixie-slim"
   GHUSER_COMPONENTS: components     # one folder per component: code.py + metadata.json + icon.png
   GHUSER_PREFIX: ""                 # prepended to every component name
