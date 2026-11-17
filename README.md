@@ -188,4 +188,4 @@ move together.
 | Rhino's pip honours the user pip config (scenario C) | ❌ to verify on one machine |
 | Rhino 8 accepts a folder as a package source; package install path (scenario D) | ❌ to verify on Windows and macOS |
 | `registry.rccn.dev/libs/ghuser-builder:1.1.0` in `templates/local/*` | ❓ needs a lab login; check the `v1.1.0` release job |
-| image built from the public mirror: `docker build -t ghuser-builder:1.1.0 https://github.com/rccn-dev/ghuser-builder.git#v1.1.0` | ✅ from source on macOS (arm64); ❌ amd64 |
+| image built from the public mirror: `docker build -t ghuser-builder:1.1.0 https://github.com/rccn-dev/ghuser-builder.git#v1.1.0` | ✅ arm64 (macOS); ✅ amd64 (GitHub's ubuntu-latest, ghuser-template's CI, which builds and packages) |
