@@ -32,7 +32,7 @@ deploy     build, then link OUT into Grasshopper's User Object folder as NAME
 status     where OUT is linked, and anything that will go wrong when it loads,
            including an installed package carrying the same components.
 uninstall  remove the links to OUT and its stamps file, so components placed from
-           it stop. Backups stay where deploy put them.
+           it stop (at once in a running Rhino). Backups stay where deploy put them.
 
 --env PATH   prepends `# env: <absolute PATH>` to every component, so Rhino imports
              your core library straight from the working copy. Edit, recompute,
@@ -246,6 +246,11 @@ def build_with_docker(staged, built, prefix, image):
         shutil.copytree(os.path.join(back, "ghuser"), built)
 
 
+def stamps_path(out):
+    """Where a build's stamps live; dev components name this path, so it must be absolute."""
+    return os.path.join(os.path.abspath(out), STAMPS)
+
+
 def read_stamps(out):
     try:
         return json.load(open(os.path.join(out, STAMPS), encoding="utf-8"))
@@ -280,7 +285,7 @@ def build(src, out, env=None, prefix="", builder=None, image=None):
         # Staged here, not in the image: the stale check names files on this machine.
         # The componentizer embeds code.py verbatim, and the verifier checks against it.
         staged = os.path.join(stage, "components")
-        prints = staging.stage(src, staged, env, os.path.join(out, STAMPS))
+        prints = staging.stage(src, staged, env, stamps_path(out))
         built = os.path.join(stage, "ghuser")
         if builder == "rhino":
             build_with_rhino(staged, built, prefix)
@@ -546,7 +551,7 @@ def check_rhino_python(src, env, install):
 
 RELOAD = r"""
 import ast, base64, json, os, sys
-ENV, CODE, REPORT = %r, %r, %r
+ENV, CODE, STAMPS, REPORT = %r, %r, %r, %r
 result = {"dropped": [], "elsewhere": [], "recomputed": [], "stale": [], "error": None}
 
 
@@ -588,13 +593,16 @@ try:
     canvas = Grasshopper.Instances.ActiveCanvas
     doc = canvas.Document if canvas else None
     for obj in list(doc.Objects) if doc else []:
-        if obj.Name not in CODE:
-            continue
         chunk = GH_LooseChunk("UserObject")
         obj.Write(chunk)
         script = chunk.FindChunk("Script")
-        code = base64.b64decode(script.GetString("Text")).decode("utf-8") if script else None
-        stale = code is not None and not same_code(code.replace("\r\n", "\n"), CODE[obj.Name])
+        code = base64.b64decode(script.GetString("Text")).decode("utf-8").replace("\r\n", "\n") if script else None
+        if obj.Name in CODE:
+            stale = code is not None and not same_code(code, CODE[obj.Name])
+        elif code and STAMPS and repr(STAMPS) in code:
+            stale = True  # placed from this dev build, which no longer has it (removed, renamed, uninstalled)
+        else:
+            continue
         result["stale" if stale else "recomputed"].append(obj.NickName or obj.Name)
         # A script component keeps the globals it compiled, so a core imported at
         # the top of code.py stays old; setting the same source recompiles it. A
@@ -613,7 +621,7 @@ with open(REPORT, "w") as f:
 """
 
 
-def reload_rhino(env, embedded):
+def reload_rhino(env, embedded, stamps):
     if not os.path.exists(RHINOCODE):
         return
     running = subprocess.run([RHINOCODE, "list"], capture_output=True, text=True).stdout.strip().splitlines()[1:]
@@ -623,7 +631,7 @@ def reload_rhino(env, embedded):
     with tempfile.TemporaryDirectory() as tmp:
         report, script = os.path.join(tmp, "report.json"), os.path.join(tmp, "reload.py")
         with open(script, "w", encoding="utf-8") as f:
-            f.write(RELOAD % (os.path.realpath(env) if env else None, embedded, report))
+            f.write(RELOAD % (os.path.realpath(env) if env else None, embedded, stamps, report))
         subprocess.run([RHINOCODE, "script", script], capture_output=True, text=True, timeout=120)
         # rhinocode returns once Rhino has the script, not when it has run it.
         deadline = time.time() + 60
@@ -639,7 +647,7 @@ def reload_rhino(env, embedded):
         print(f"ghuser_dev: Rhino had {e} (an installed package?); it now imports from {env}")
     if result["recomputed"]:
         print(f"ghuser_dev: recomputed {', '.join(result['recomputed'])}")
-    elif not result["stale"]:
+    elif not result["stale"] and embedded:
         print("ghuser_dev: none of these components is on the open canvas")
     if result["stale"]:
         print(f"ghuser_dev: stopped on the canvas, older than this build: {', '.join(result['stale'])}")
@@ -670,13 +678,15 @@ def main(argv=None):
     deploy.add_argument("--no-reload", action="store_true", help="leave a running Rhino alone")
     for name in ("status", "uninstall"):
         sub.add_parser(name).add_argument("out", help="the folder deploy linked")
+    sub.choices["uninstall"].add_argument("--no-reload", action="store_true", help="leave a running Rhino alone")
     a = ap.parse_args(argv)
     uo = user_objects()
 
     if a.command == "status":
         sys.exit(1 if status(a.out, uo) else 0)
     if a.command == "uninstall":
-        return uninstall(a.out, uo)
+        uninstall(a.out, uo)
+        return None if a.no_reload else reload_rhino(None, {}, stamps_path(a.out))
 
     embedded = build(a.src, a.out, a.env, a.prefix, a.builder, a.image)
     if a.command == "build":
@@ -689,7 +699,7 @@ def main(argv=None):
     print(f"ghuser_dev: Grasshopper loads {a.out}/ as {os.path.join(uo, name)}")
     problems = check_rhino_python(a.src, a.env, a.requirements)
     if not a.no_reload:
-        reload_rhino(a.env, embedded)
+        reload_rhino(a.env, embedded, stamps_path(a.out))
     for p in problems:
         print(f"ghuser_dev: PROBLEM {p}")
     sys.exit(1 if problems else 0)

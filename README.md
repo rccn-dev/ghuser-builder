@@ -35,7 +35,7 @@ to a release of this repo.
 # .gitlab-ci.yml
 include:
   - project: libs/ghuser-builder
-    ref: v1.2.0
+    ref: v1.2.1
     file: templates/gitlab/ghuser.gitlab-ci.yml
 
 variables:
@@ -51,7 +51,7 @@ To run the pipeline locally: [`gitlab-ci-local`](https://github.com/firecow/gitl
 ### On your machine
 
 ```bash
-docker build -t ghuser-builder:local https://github.com/rccn-dev/ghuser-builder.git#v1.2.0   # once
+docker build -t ghuser-builder:local https://github.com/rccn-dev/ghuser-builder.git#v1.2.1   # once
 cp templates/local/ghuser <project>/scripts/ghuser
 scripts/ghuser --yak my-tool               # components/ -> dist/
 ```
@@ -189,14 +189,18 @@ move together.
 
 ## Status: what has been checked
 
+How to check, and what to run before a release: [`docs/validation.md`](docs/validation.md).
+The dev-loop scenarios run headless and in Docker on every push, and in Rhino by hand.
+
 | Claim | Checked |
 | --- | --- |
+| dev-loop scenarios (`tests/scenarios.py`: core, `code.py`, metadata, icon, added, removed, renamed, moved, upgraded, uninstalled) | ✅ headless (`tests/test_dev_scenarios.py`); ✅ Docker, arm64 (colima); ✅ Rhino 8.37, macOS (`tests/rhino/run_scenarios.py`), 2026-11-17; ❓ Windows; ❓ amd64 Docker until the GitHub `tests` workflow runs |
+| a component whose top level fails (its `src/` gone) keeps its `dev:` label | ✅ Rhino 8.37, macOS |
 | image builds (arm64, Docker 27); examples build, verify and package | ✅ `tests/run_examples.sh` |
 | verifier rejects a mismatched `.ghuser`, and one without a canvas icon | ✅ same script |
 | `local/ghuser_dev.py` with Rhino 8.36 (.NET 10) on macOS (arm64) | ✅ example 02 with `--env src` |
 | `ghuser_dev.py deploy` reload: drops `--env` modules, recompiles, recomputes, flags stale canvas code | ✅ example 02 in Rhino 8.36; a core imported at the top of `code.py`, with typed inputs, in Rhino 8.37 |
 | reload drops a core of the same name left by an installed `.yak` | ✅ Rhino 8.37, macOS |
-| stale check: stops after a `code.py` / `metadata.json` edit, in a reopened `.gh`, after `uninstall`; runs again when the stamps agree | ✅ Rhino 8.37, macOS (ghuser-template); the logic in `tests/test_ghuser_dev.py` |
 | `ghuser_dev.py --builder docker` (tar stream) and `ghuser-build --env` | ✅ macOS, colima with sshfs (5 quick size-changing edits, all verified); `tests/run_examples.sh` |
 | `ghuser_dev.py` link, backup, status, uninstall | ✅ `tests/test_ghuser_dev.py` (symlinks) |
 | `ghuser_dev.py` on Windows: junction, `%APPDATA%` paths, `rhinocode.exe`, Rhino's Python | ✅ lab PC, 1.1.0 (ghuser-template's dev loop); ❓ 1.2.0's stale check and tar stream |
@@ -210,5 +214,5 @@ move together.
 | generated `.ghuser` / `.yak` load in Rhino 8 | ✅ macOS, Rhino 8.37: `.yak` installed with `yak install`, vendored core imported from the package's `lib/`; ❌ Windows |
 | Rhino's pip honours the user pip config (scenario C) | ❌ to verify on one machine |
 | Rhino 8 accepts a folder as a package source; package install path (scenario D) | ❌ to verify on Windows and macOS |
-| `registry.rccn.dev/libs/ghuser-builder:1.2.0` in `templates/local/*` | ❓ needs a lab login; check the `v1.2.0` release job |
-| image built from the public mirror: `docker build -t ghuser-builder:1.2.0 https://github.com/rccn-dev/ghuser-builder.git#v1.2.0` | ✅ arm64 (macOS); ✅ amd64 (GitHub's ubuntu-latest, ghuser-template's CI, which builds and packages) |
+| `registry.rccn.dev/libs/ghuser-builder:1.2.1` in `templates/local/*` | ❓ needs a lab login; check the `v1.2.1` release job |
+| image built from the public mirror: `docker build -t ghuser-builder:1.2.1 https://github.com/rccn-dev/ghuser-builder.git#v1.2.1` | ✅ arm64 (macOS); ✅ amd64 (GitHub's ubuntu-latest, ghuser-template's CI, which builds and packages) |

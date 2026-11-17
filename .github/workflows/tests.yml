@@ -1,0 +1,33 @@
+# On the GitHub mirror: the tests GitLab cannot run there. GitLab's pipeline
+# (.gitlab-ci.yml) builds and publishes the image; this one adds
+#   * the unit and scenario tests on Windows and macOS as well as Linux:
+#     junctions, %APPDATA% paths, path handling (tests/, headless canvas);
+#   * the scenario tests built for real in Docker, on amd64, with an image
+#     built from this commit.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv run --no-project --python 3.12 --with pytest pytest -q tests
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: docker build -t ghuser-builder:ci .
+      - run: uv run --no-project --python 3.12 --with pytest pytest -q tests/test_dev_scenarios.py
+        env:
+          GHUSER_TEST_IMAGE: ghuser-builder:ci
