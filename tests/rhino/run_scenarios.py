@@ -7,7 +7,7 @@
 
 Needs Rhino 8 running (macOS or Windows; Grasshopper is opened if it is not) and Docker
 with the builder image. Not headless, and not for CI: run it before a release, on each OS,
-and record the result in the README's Status table. It checks what tests/canvas.py
+and record the result in docs/validation.md's Status table. It checks what tests/canvas.py
 assumes: that Rhino compiles a dev component's top level with `ghenv`, shows the label
 and the reason, runs RELOAD as written, and keeps a placed component's code in a saved file.
 

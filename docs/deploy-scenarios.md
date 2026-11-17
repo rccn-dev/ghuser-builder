@@ -175,4 +175,4 @@ short-lived tools, not for anything others build on.
 3. For C: confirm Rhino's pip uses the lab index (watch the `# r:` install in the
    script editor's console).
 
-Then update the "Status" table in the README.
+Then update the Status table in [validation.md](validation.md#status-what-has-been-checked).
