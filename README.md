@@ -25,13 +25,17 @@ Action on a Windows runner.
 
 ## Use it
 
+Starting a project? [**ghuser-template**](https://github.com/rccn-dev/ghuser-template)
+has the layout (core, tests, components), a linked dev loop and the `.yak` build, pinned
+to a release of this repo.
+
 ### In a GitLab project (lab default)
 
 ```yaml
 # .gitlab-ci.yml
 include:
   - project: libs/ghuser-builder
-    ref: v1.0.0
+    ref: v1.1.0
     file: templates/gitlab/ghuser.gitlab-ci.yml
 
 variables:
@@ -47,7 +51,7 @@ To run the pipeline locally: [`gitlab-ci-local`](https://github.com/firecow/gitl
 ### On your machine
 
 ```bash
-docker build -t ghuser-builder:local .     # once, in this repo (or from its git URL)
+docker build -t ghuser-builder:local https://github.com/rccn-dev/ghuser-builder.git#v1.1.0   # once
 cp templates/local/ghuser <project>/scripts/ghuser
 scripts/ghuser --yak my-tool               # components/ -> dist/
 ```
@@ -183,4 +187,5 @@ move together.
 | generated `.ghuser` / `.yak` load in Rhino 8 | ✅ macOS, Rhino 8.37: `.yak` installed with `yak install`, vendored core imported from the package's `lib/`; ❌ Windows |
 | Rhino's pip honours the user pip config (scenario C) | ❌ to verify on one machine |
 | Rhino 8 accepts a folder as a package source; package install path (scenario D) | ❌ to verify on Windows and macOS |
-| `registry.rccn.dev/libs/ghuser-builder:1.0.0` in `templates/local/*` | ❓ not published yet: no `v1.0.0` tag, so the release job has not run |
+| `registry.rccn.dev/libs/ghuser-builder:1.1.0` in `templates/local/*` | ❓ needs a lab login; check the `v1.1.0` release job |
+| image built from the public mirror: `docker build -t ghuser-builder:1.1.0 https://github.com/rccn-dev/ghuser-builder.git#v1.1.0` | ✅ from source on macOS (arm64); ❌ amd64 |
