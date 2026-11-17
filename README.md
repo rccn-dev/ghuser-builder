@@ -35,7 +35,7 @@ to a release of this repo.
 # .gitlab-ci.yml
 include:
   - project: libs/ghuser-builder
-    ref: v1.1.0
+    ref: v1.2.0
     file: templates/gitlab/ghuser.gitlab-ci.yml
 
 variables:
@@ -51,12 +51,14 @@ To run the pipeline locally: [`gitlab-ci-local`](https://github.com/firecow/gitl
 ### On your machine
 
 ```bash
-docker build -t ghuser-builder:local https://github.com/rccn-dev/ghuser-builder.git#v1.1.0   # once
+docker build -t ghuser-builder:local https://github.com/rccn-dev/ghuser-builder.git#v1.2.0   # once
 cp templates/local/ghuser <project>/scripts/ghuser
 scripts/ghuser --yak my-tool               # components/ -> dist/
 ```
 
-It runs `docker run` with the project folder mounted. On Windows, copy
+It runs `docker run` with the project folder mounted (on colima, start it with
+`--mount-type virtiofs`: its default sshfs can serve a file you just saved in its old
+version; ghuser-template's scripts avoid the mount altogether). On Windows, copy
 `templates/local/ghuser.py` instead and run `uv run scripts/ghuser.py --yak my-tool`.
 Either uses `ghuser-builder:local` unless `GHUSER_BUILDER_IMAGE` names another image. Where mounting is not possible
 (`act` on macOS, some Docker-in-Docker setups), [`templates/local/Dockerfile`](templates/local/Dockerfile)
@@ -76,17 +78,36 @@ core library straight from the working copy, so you edit and recompute without
 reinstalling. A `# r: core=={{version}}` pin is left out of such a build, since
 `--env` provides that library. Two builders:
 
-- `--builder rhino` (the default on a Mac with Rhino 8): the pinned componentizer on
-  **Rhino 8's own .NET and GH_IO**, no Docker. No canvas icon.
-- `--builder docker` (the default elsewhere): `ghuser-build --env` in the image
-  (`--image`, or `GHUSER_BUILDER_IMAGE`, default `ghuser-builder:local`). Full icons.
+- `--builder docker` (the default, every OS): `ghuser-build` in the image (`--image`, or
+  `GHUSER_BUILDER_IMAGE`, default `ghuser-builder:local`), the one that builds releases.
+  Full icons. The components go in and come back as a tar stream, not through a shared
+  folder: colima's default sharing (sshfs) served a just-rewritten file in its old
+  version in 1 of 8 tries, and a build must use what is on disk.
+- `--builder rhino` (macOS, no Docker): the pinned componentizer on Rhino 8's own .NET
+  and GH_IO. No canvas icon. For working on this repo.
+
+What each edit needs, because Grasshopper reads each part at a different time:
+
+| You edit | Read | Then |
+| --- | --- | --- |
+| the core (`--env`) | on every run | `deploy`: Rhino forgets it, the canvas recomputes |
+| `code.py` | once, when a component is placed; saved in the `.gh` | replace the component |
+| `metadata.json`, `icon.png`, a new component | when Grasshopper starts | restart Rhino, then replace |
+
+`deploy` says this per component after each build. Every dev component also carries a
+fingerprint of its `code.py`, `metadata.json` and `icon.png`, and checks it against
+`dist-dev/ghuser-dev.json` when it compiles (placed, opened, reloaded). If the latest build
+differs, or `uninstall` removed it, the component stops with the reason on the canvas
+(`dev: replace`, `dev: restart, replace`, `dev: not deployed`) instead of running old code
+quietly, including in a `.gh` file reopened later.
 
 `deploy` builds, links `dist-dev` into Grasshopper's User Object folder as
 `<folder>-dev` (`--name` to choose; a junction on Windows, no admin needed), and moves loose older copies of the same
 components to `~/.cache/ghuser-builder/backups/`. It then checks the `# r:` requirements and the
 components' imports in Rhino's own Python (`--requirements` installs what is
-missing), and if Rhino is running, drops modules loaded from `--env`, recompiles and
-recomputes the components on the canvas, and names any that carry older code
+missing), and if Rhino is running, drops the core's modules (wherever they came from:
+an installed `.yak` loads the same names), recompiles and recomputes the components
+on the canvas, and names any that carry older code, which then stop
 (`--no-reload` to skip). `status` says what Grasshopper will load and what collides,
 including an installed package with the same components: uninstall it while you develop.
 
@@ -174,9 +195,11 @@ move together.
 | verifier rejects a mismatched `.ghuser`, and one without a canvas icon | ✅ same script |
 | `local/ghuser_dev.py` with Rhino 8.36 (.NET 10) on macOS (arm64) | ✅ example 02 with `--env src` |
 | `ghuser_dev.py deploy` reload: drops `--env` modules, recompiles, recomputes, flags stale canvas code | ✅ example 02 in Rhino 8.36; a core imported at the top of `code.py`, with typed inputs, in Rhino 8.37 |
-| `ghuser_dev.py --builder docker` and `ghuser-build --env` | ✅ macOS, image built locally; `tests/run_examples.sh` |
+| reload drops a core of the same name left by an installed `.yak` | ✅ Rhino 8.37, macOS |
+| stale check: stops after a `code.py` / `metadata.json` edit, in a reopened `.gh`, after `uninstall`; runs again when the stamps agree | ✅ Rhino 8.37, macOS (ghuser-template); the logic in `tests/test_ghuser_dev.py` |
+| `ghuser_dev.py --builder docker` (tar stream) and `ghuser-build --env` | ✅ macOS, colima with sshfs (5 quick size-changing edits, all verified); `tests/run_examples.sh` |
 | `ghuser_dev.py` link, backup, status, uninstall | ✅ `tests/test_ghuser_dev.py` (symlinks) |
-| `ghuser_dev.py` on Windows: junction, `%APPDATA%` paths, `rhinocode.exe`, Rhino's Python | ❌ written, not yet run on Windows |
+| `ghuser_dev.py` on Windows: junction, `%APPDATA%` paths, `rhinocode.exe`, Rhino's Python | ✅ lab PC, 1.1.0 (ghuser-template's dev loop); ❓ 1.2.0's stale check and tar stream |
 | `templates/local/ghuser.py` | ✅ macOS; ❌ Windows |
 | Grasshopper loads user objects through a symlinked folder | ❓ not yet checked by restarting Grasshopper |
 | core tests on Python 3.9; `uv version` + `uv build` give matching wheel versions | ✅ locally |
@@ -187,5 +210,5 @@ move together.
 | generated `.ghuser` / `.yak` load in Rhino 8 | ✅ macOS, Rhino 8.37: `.yak` installed with `yak install`, vendored core imported from the package's `lib/`; ❌ Windows |
 | Rhino's pip honours the user pip config (scenario C) | ❌ to verify on one machine |
 | Rhino 8 accepts a folder as a package source; package install path (scenario D) | ❌ to verify on Windows and macOS |
-| `registry.rccn.dev/libs/ghuser-builder:1.1.0` in `templates/local/*` | ❓ needs a lab login; check the `v1.1.0` release job |
-| image built from the public mirror: `docker build -t ghuser-builder:1.1.0 https://github.com/rccn-dev/ghuser-builder.git#v1.1.0` | ✅ arm64 (macOS); ✅ amd64 (GitHub's ubuntu-latest, ghuser-template's CI, which builds and packages) |
+| `registry.rccn.dev/libs/ghuser-builder:1.2.0` in `templates/local/*` | ❓ needs a lab login; check the `v1.2.0` release job |
+| image built from the public mirror: `docker build -t ghuser-builder:1.2.0 https://github.com/rccn-dev/ghuser-builder.git#v1.2.0` | ✅ arm64 (macOS); ✅ amd64 (GitHub's ubuntu-latest, ghuser-template's CI, which builds and packages) |

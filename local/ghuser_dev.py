@@ -10,12 +10,12 @@
     uv run <ghuser-builder>/local/ghuser_dev.py uninstall dist-dev
 
 macOS and Windows, Rhino 8. Two builders (--builder):
+  docker  the default, on every OS: ghuser-build in the builder image (--image, or
+          GHUSER_BUILDER_IMAGE), the same one that builds a release. Full icons.
+          The components go in and come back as a tar stream, not a shared folder,
+          whose cache (colima's sshfs) can hand Docker a file in its old version.
   rhino   macOS only, no Docker: the same pinned componentizer on Rhino 8's own
-          .NET and GH_IO.dll, so files match exactly the Rhino you load them in.
-          No canvas icon. The default on a Mac with Rhino 8 in /Applications.
-  docker  any OS: `ghuser-build --env` in the builder image (--image, or
-          GHUSER_BUILDER_IMAGE). Full icons; the pinned GH_IO of the image.
-          The default everywhere else. src and out must be inside the current folder.
+          .NET and GH_IO.dll. No canvas icon. For working on ghuser-builder itself.
 `ghuser_dev.py components dist-dev` (no command) is `build`, as before.
 
 build      componentize and verify into OUT, replacing what was there.
@@ -25,12 +25,14 @@ deploy     build, then link OUT into Grasshopper's User Object folder as NAME
            Grasshopper loads one of each. Then checks, in Rhino's own Python, the
            `# r:` requirements and that what the components import imports; with
            Rhino running, drops modules loaded from --env and recomputes the
-           components on the canvas, listing any that carry older code.
+           components on the canvas. Says, per component, what changed and what
+           to do: replace it on the canvas, or restart Rhino first.
              --requirements  install missing `# r:` packages into Rhino, visibly
              --no-reload     leave a running Rhino alone
 status     where OUT is linked, and anything that will go wrong when it loads,
            including an installed package carrying the same components.
-uninstall  remove the links to OUT. Backups stay where deploy put them.
+uninstall  remove the links to OUT and its stamps file, so components placed from
+           it stop. Backups stay where deploy put them.
 
 --env PATH   prepends `# env: <absolute PATH>` to every component, so Rhino imports
              your core library straight from the working copy. Edit, recompute,
@@ -38,6 +40,12 @@ uninstall  remove the links to OUT. Backups stay where deploy put them.
              compas componentizer.) A `# r:` pin on {{version}} names that same
              library, so a dev build with --env leaves it out: 0.0.0-dev.local
              is on no index.
+
+STALE COMPONENTS. A component on the canvas keeps the code.py it was placed with,
+and it is saved in the .gh file like that. Every dev component carries a fingerprint of its
+code.py, metadata.json and icon.png, and stops with an error when OUT/ghuser-dev.json
+(written by each build) says the latest build differs, or is gone. So an old
+component in a reopened file is never run quietly.
 
 DEV ONLY, by design:
   * with the rhino builder, no canvas icon: Rhino's macOS System.Drawing cannot
@@ -53,6 +61,7 @@ installed-package and backup folders (tests use them).
 
 import argparse
 import ast
+import io
 import json
 import os
 import platform
@@ -61,6 +70,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 import urllib.request
@@ -68,6 +78,7 @@ import urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOLS = os.path.join(os.path.dirname(HERE), "tools")
 sys.path.insert(0, TOOLS)
+import dev_code as staging  # noqa: E402
 from dev_code import bundles, dev_code, env_header, split_requirements  # noqa: E402
 
 WINDOWS = platform.system() == "Windows"
@@ -90,6 +101,9 @@ else:
     PACKAGES = os.path.expanduser("~/Library/Application Support/McNeel/Rhinoceros/packages/8.0")
 IMAGE = "ghuser-builder:local"
 VERSION = "0.0.0-dev.local"
+STAMPS = "ghuser-dev.json"
+# In the container: unpack stdin into a fresh folder, run the command, send out/ back.
+IN_IMAGE = 'set -e; mkdir -p /tmp/work; cd /tmp/work; tar -xf -; "$@" >&2; tar -cf - -C out .'
 ICON_LINES = (
     "    bitmap_icon = System.Drawing.Bitmap.FromStream(System.IO.MemoryStream(icon))\n"
     '    ghpython_root.SetDrawingBitmap("IconOverride", bitmap_icon)\n'
@@ -171,93 +185,109 @@ def imported_modules(code):
 
 
 def default_builder():
-    return "rhino" if platform.system() == "Darwin" and os.path.isdir(RHINO) else "docker"
+    return "docker"
 
 
-def embedded_code(src, env, prefix=""):
-    """{component name: code} as a dev build embeds it, to compare with the canvas."""
+def embedded_code(staged, prefix=""):
+    """{component name: code} as the staged build embeds it, to compare with the canvas."""
     import verify_ghuser
 
     embedded = {}
-    for d in bundles(src):
-        code_py = os.path.join(src, d, "code.py")
+    for d in bundles(staged):
+        code_py = os.path.join(staged, d, "code.py")
         if os.path.isfile(code_py):
-            text = dev_code(open(code_py, encoding="utf-8").read(), env_header(env))
-            meta = json.load(open(os.path.join(src, d, "metadata.json"), encoding="utf-8"))
+            text = open(code_py, encoding="utf-8").read()
+            meta = json.load(open(os.path.join(staged, d, "metadata.json"), encoding="utf-8"))
             embedded[prefix + meta["name"]] = verify_ghuser.expected_code(text, VERSION, meta["name"], d + ".ghuser")
     return embedded
 
 
-def build_with_rhino(src, built, env, prefix):
+def build_with_rhino(staged, built, prefix):
     System, GH_LooseChunk = start_rhino_dotnet()
     cz = load_componentizer(componentizer_sha())
-    import dev_code as staging
     import verify_ghuser
 
     verify_ghuser.use_ghio(System, GH_LooseChunk)
-    with tempfile.TemporaryDirectory() as stage:
-        # The componentizer embeds code.py verbatim, so change a copy; the
-        # verifier then checks the files against exactly what went in.
-        work = os.path.join(stage, "components")
-        staging.stage(src, work, env)
-        for d in bundles(work):
-            cz.create_ghuser_component(os.path.join(work, d), os.path.join(built, d + ".ghuser"), VERSION, prefix or None)
-        if not verify_ghuser.verify_all(work, built, VERSION, prefix, canvas_icon=False):
-            sys.exit(1)
+    os.makedirs(built)
+    for d in bundles(staged):
+        cz.create_ghuser_component(os.path.join(staged, d), os.path.join(built, d + ".ghuser"), VERSION, prefix or None)
+    if not verify_ghuser.verify_all(staged, built, VERSION, prefix, canvas_icon=False):
+        sys.exit(1)
 
 
-def inside_cwd(path):
-    rel = os.path.relpath(os.path.abspath(path), os.getcwd())
-    if rel == os.pardir or rel.startswith(os.pardir + os.sep):
-        sys.exit(f"ghuser_dev: --builder docker mounts the current folder; {path} is outside it")
-    return rel.replace(os.sep, "/")
-
-
-def docker_command(src, stage, env, prefix, image):
-    """`docker run` for ghuser-build in the image, with the current folder mounted at /work."""
-    cmd = ["docker", "run", "--rm", "-v", f"{os.getcwd()}:/work", "-w", "/work", "-e", "HOME=/tmp"]
-    if hasattr(os, "getuid"):  # files in the mount belong to you, not root (not on Windows)
-        cmd += ["-u", f"{os.getuid()}:{os.getgid()}"]
-    cmd += [image, "ghuser-build", "--version", VERSION]
-    if env:
-        cmd += ["--env", env]
+def docker_command(prefix, image):
+    """`docker run` for ghuser-build in the image, on components/ sent as a tar stream."""
+    cmd = ["docker", "run", "-i", "--rm", "-e", "HOME=/tmp", image, "sh", "-c", IN_IMAGE, "sh",
+           "ghuser-build", "--version", VERSION]
     if prefix:
         cmd += ["--prefix", prefix]
-    return cmd + [inside_cwd(src), inside_cwd(stage)]
+    return cmd + ["components", "out"]
 
 
-def build_with_docker(src, built, env, prefix, image):
-    stage = os.path.join(os.getcwd(), ".ghuser-dev-stage")
-    shutil.rmtree(stage, ignore_errors=True)
+def build_with_docker(staged, built, prefix, image):
+    sent = io.BytesIO()
+    with tarfile.open(fileobj=sent, mode="w") as tar:
+        tar.add(staged, arcname="components")
     try:
-        try:
-            run = subprocess.run(docker_command(src, stage, env, prefix, image), capture_output=True, text=True)
-        except FileNotFoundError:
-            sys.exit("ghuser_dev: docker not found; install Docker Desktop (or OrbStack, colima) and start it")
-        if run.returncode:
-            sys.exit(f"{run.stdout}{run.stderr}\nghuser_dev: ghuser-build in {image} failed. No image? Build it once:\n"
-                     f"  docker build -t {image} <ghuser-builder checkout or git URL>")
-        # Mono's warnings and the componentizer's progress are noise when it worked.
-        for line in run.stdout.splitlines():
-            if line.startswith(("[verified]", "ghuser-build  version")):
-                print(line)
-        for f in os.listdir(os.path.join(stage, "ghuser")):
-            shutil.copy2(os.path.join(stage, "ghuser", f), os.path.join(built, f))
-    finally:
-        shutil.rmtree(stage, ignore_errors=True)
+        run = subprocess.run(docker_command(prefix, image), input=sent.getvalue(), capture_output=True)
+    except FileNotFoundError:
+        sys.exit("ghuser_dev: docker not found; install Docker Desktop (or OrbStack, colima) and start it")
+    log = run.stderr.decode("utf-8", "replace")
+    if run.returncode:
+        sys.exit(f"{log}\nghuser_dev: ghuser-build in {image} failed. No image? Build it once:\n"
+                 f"  docker build -t {image} <ghuser-builder checkout or git URL>")
+    # Mono's warnings and the componentizer's progress are noise when it worked.
+    for line in log.splitlines():
+        if line.startswith("[verified]"):
+            print(line)
+    with tempfile.TemporaryDirectory() as back:
+        with tarfile.open(fileobj=io.BytesIO(run.stdout)) as tar:
+            tar.extractall(back, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
+        shutil.copytree(os.path.join(back, "ghuser"), built)
+
+
+def read_stamps(out):
+    try:
+        return json.load(open(os.path.join(out, STAMPS), encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def changes(before, after):
+    """What a rebuild means for Grasshopper: [(folder, what to do)]."""
+    notes = []
+    for d in sorted(set(before) | set(after)):
+        old, new = before.get(d), after.get(d)
+        if old == new:
+            continue
+        if old is None:
+            notes.append((d, "new: restart Rhino to see it in the toolbar"))
+        elif new is None:
+            notes.append((d, "removed: restart Rhino; copies on the canvas now stop"))
+        elif old["interface"] != new["interface"]:
+            notes.append((d, "inputs, outputs or icon changed: restart Rhino, then replace it on the canvas"))
+        else:
+            notes.append((d, "code.py changed: replace it on the canvas"))
+    return notes
 
 
 def build(src, out, env=None, prefix="", builder=None, image=None):
-    """Build and verify into out. Returns {component name: embedded code} for deploy."""
+    """Build and verify into out, and write its stamps. Returns {component name: embedded code} for deploy."""
     builder = builder or default_builder()
     env = os.path.abspath(env) if env else None
-    with tempfile.TemporaryDirectory() as tmp:
-        built = os.path.join(tmp, "ghuser")
-        os.makedirs(built)
+    out = os.path.abspath(out)
+    with tempfile.TemporaryDirectory() as stage:
+        # Staged here, not in the image: the stale check names files on this machine.
+        # The componentizer embeds code.py verbatim, and the verifier checks against it.
+        staged = os.path.join(stage, "components")
+        prints = staging.stage(src, staged, env, os.path.join(out, STAMPS))
+        built = os.path.join(stage, "ghuser")
         if builder == "rhino":
-            build_with_rhino(src, built, env, prefix)
+            build_with_rhino(staged, built, prefix)
         else:
-            build_with_docker(src, built, env, prefix, image or os.environ.get("GHUSER_BUILDER_IMAGE") or IMAGE)
+            build_with_docker(staged, built, prefix, image or os.environ.get("GHUSER_BUILDER_IMAGE") or IMAGE)
+        embedded = embedded_code(staged, prefix)
+        before = read_stamps(out)
         # Replace, not add: a removed or renamed component must not keep loading.
         os.makedirs(out, exist_ok=True)
         for f in os.listdir(out):
@@ -265,11 +295,16 @@ def build(src, out, env=None, prefix="", builder=None, image=None):
                 os.remove(os.path.join(out, f))
         for f in os.listdir(built):
             shutil.copy2(os.path.join(built, f), os.path.join(out, f))
+        # Last, so a component never sees stamps whose file is not there yet.
+        with open(os.path.join(out, STAMPS), "w", encoding="utf-8") as f:
+            json.dump(prints, f, indent=1, sort_keys=True)
 
-    print(f"ghuser_dev: wrote {out}/ (dev build with {builder}: version {VERSION}"
+    print(f"ghuser_dev: wrote {os.path.relpath(out)}/ (dev build with {builder}: version {VERSION}"
           + (", no canvas icon" if builder == "rhino" else "")
           + (f", imports from {env})" if env else ")"))
-    return embedded_code(src, env, prefix)
+    for d, note in changes(before, prints):
+        print(f"ghuser_dev: {d} {note}")
+    return embedded
 
 
 # --- Grasshopper's User Object folder -------------------------------------------
@@ -423,6 +458,10 @@ def uninstall(out, uo):
         print(f"ghuser_dev: removed {os.path.join(uo, n)}")
     if not names:
         print(f"ghuser_dev: {out} is not linked in {uo}")
+    stamps = os.path.join(out, STAMPS)
+    if os.path.exists(stamps):
+        os.remove(stamps)
+        print("ghuser_dev: dev components still on a canvas now stop; replace them from the installed package")
 
 
 # --- Rhino's Python ------------------------------------------------------------
@@ -508,7 +547,7 @@ def check_rhino_python(src, env, install):
 RELOAD = r"""
 import ast, base64, json, os, sys
 ENV, CODE, REPORT = %r, %r, %r
-result = {"dropped": [], "recomputed": [], "stale": [], "error": None}
+result = {"dropped": [], "elsewhere": [], "recomputed": [], "stale": [], "error": None}
 
 
 def same_code(a, b):
@@ -531,11 +570,18 @@ def same_code(a, b):
     return key(a) == key(b)
 
 if ENV:
+    # Every module named like a package in ENV goes, wherever it came from: one
+    # left from an installed .yak would otherwise stand in for the working copy.
+    names = {os.path.splitext(e)[0] for e in os.listdir(ENV)
+             if e.endswith(".py") or os.path.isfile(os.path.join(ENV, e, "__init__.py"))}
     for name, module in list(sys.modules.items()):
         path = getattr(module, "__file__", None)
-        if path and os.path.normcase(os.path.realpath(path)).startswith(os.path.normcase(ENV) + os.sep):
+        inside = path and os.path.normcase(os.path.realpath(path)).startswith(os.path.normcase(ENV) + os.sep)
+        if inside or name.split(".")[0] in names:
             del sys.modules[name]
             result["dropped"].append(name)
+            if path and not inside and "." not in name:
+                result["elsewhere"].append(name + " from " + os.path.dirname(os.path.dirname(path)))
 try:
     import Grasshopper
     from GH_IO.Serialization import GH_LooseChunk
@@ -548,18 +594,17 @@ try:
         obj.Write(chunk)
         script = chunk.FindChunk("Script")
         code = base64.b64decode(script.GetString("Text")).decode("utf-8") if script else None
-        if code is not None and not same_code(code.replace("\r\n", "\n"), CODE[obj.Name]):
-            result["stale"].append(obj.NickName or obj.Name)
-        else:
-            # A script component keeps the globals it compiled, so a core imported at
-            # the top of code.py stays old; setting the same source recompiles it.
-            if hasattr(obj, "TryGetSource"):
-                ok, source = obj.TryGetSource()
-                if ok:
-                    obj.SetSource(source)
-            obj.ExpireSolution(False)
-            result["recomputed"].append(obj.NickName or obj.Name)
-    if result["recomputed"]:
+        stale = code is not None and not same_code(code.replace("\r\n", "\n"), CODE[obj.Name])
+        result["stale" if stale else "recomputed"].append(obj.NickName or obj.Name)
+        # A script component keeps the globals it compiled, so a core imported at
+        # the top of code.py stays old; setting the same source recompiles it. A
+        # stale one recompiles too, and its own check stops it.
+        if hasattr(obj, "TryGetSource"):
+            ok, source = obj.TryGetSource()
+            if ok:
+                obj.SetSource(source)
+        obj.ExpireSolution(False)
+    if result["recomputed"] or result["stale"]:
         doc.NewSolution(False)
 except Exception as e:
     result["error"] = "%%s: %%s" %% (type(e).__name__, e)
@@ -589,14 +634,17 @@ def reload_rhino(env, embedded):
             return
         result = json.load(open(report))
     if result["dropped"]:
-        print(f"ghuser_dev: Rhino forgot {len(result['dropped'])} modules from {env}")
+        print(f"ghuser_dev: Rhino forgot {len(result['dropped'])} modules of the core")
+    for e in result["elsewhere"]:
+        print(f"ghuser_dev: Rhino had {e} (an installed package?); it now imports from {env}")
     if result["recomputed"]:
         print(f"ghuser_dev: recomputed {', '.join(result['recomputed'])}")
+    elif not result["stale"]:
+        print("ghuser_dev: none of these components is on the open canvas")
     if result["stale"]:
-        print(f"ghuser_dev: older code on the canvas, replace from the toolbar: {', '.join(result['stale'])}")
+        print(f"ghuser_dev: stopped on the canvas, older than this build: {', '.join(result['stale'])}")
     if result["error"]:
         print(f"ghuser_dev: reloading in Rhino failed: {result['error']}")
-    print("ghuser_dev: components new to this build appear after restarting Grasshopper")
 
 
 # --- command line --------------------------------------------------------------
@@ -614,7 +662,7 @@ def main(argv=None):
         p.add_argument("out", help="output folder (e.g. build/ghuser-dev)")
         p.add_argument("--env", help="folder to put on Rhino's sys.path via `# env:` (e.g. src)")
         p.add_argument("--prefix", default="")
-        p.add_argument("--builder", choices=("rhino", "docker"), help=f"default here: {default_builder()}")
+        p.add_argument("--builder", choices=("docker", "rhino"), default="docker", help="default: docker")
         p.add_argument("--image", help=f"builder image for --builder docker (default: $GHUSER_BUILDER_IMAGE or {IMAGE})")
     deploy = sub.choices["deploy"]
     deploy.add_argument("--name", help="link name in the User Object folder (default: <current folder>-dev)")

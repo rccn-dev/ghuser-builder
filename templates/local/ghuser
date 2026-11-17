@@ -8,7 +8,7 @@
 #
 # Any ghuser-build option passes through. Needs Docker (Desktop, OrbStack, colima)
 # and the image: `docker build -t ghuser-builder:local <ghuser-builder>` once, or
-# GHUSER_BUILDER_IMAGE=registry.rccn.dev/libs/ghuser-builder:1.1.0 with a lab login.
+# GHUSER_BUILDER_IMAGE=registry.rccn.dev/libs/ghuser-builder:1.2.0 with a lab login.
 # ghuser.py beside it does the same on Windows.
 set -euo pipefail
 IMAGE="${GHUSER_BUILDER_IMAGE:-ghuser-builder:local}"
