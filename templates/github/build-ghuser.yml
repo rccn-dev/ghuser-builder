@@ -18,7 +18,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/rccn-dev/ghuser-builder:1.1.0   # <- where you mirrored it
+      image: ghcr.io/rccn-dev/ghuser-builder:1.2.0   # <- where you mirrored it
     env:
       GHUSER_YAK_NAME: my-tool                           # empty = no .yak
     steps:

@@ -1,5 +1,6 @@
 """Tests for local/ghuser_dev.py that need no Rhino.   uv run --with pytest pytest tests"""
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -121,20 +122,96 @@ def test_the_original_command_line_still_means_build(monkeypatch):
     assert seen == {"src": "components", "out": "dist-dev", "env": "src"}
 
 
-def test_docker_command_mounts_the_current_folder_and_passes_the_host_env_path(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    cmd = ghuser_dev.docker_command("components", str(tmp_path / ".stage"), "/home/me/proj/src", "", "img:1")
-    assert cmd[:6] == ["docker", "run", "--rm", "-v", f"{tmp_path}:/work", "-w"]
+def test_docker_command_sends_the_components_in_and_mounts_nothing():
+    cmd = ghuser_dev.docker_command("Rk ", "img:1")
+    assert "-v" not in cmd and cmd[:4] == ["docker", "run", "-i", "--rm"]
     i = cmd.index("img:1")
-    assert cmd[i:] == ["img:1", "ghuser-build", "--version", ghuser_dev.VERSION,
-                       "--env", "/home/me/proj/src", "components", ".stage"]
+    assert cmd[i:i + 4] == ["img:1", "sh", "-c", ghuser_dev.IN_IMAGE]
+    assert cmd[i + 5:] == ["ghuser-build", "--version", ghuser_dev.VERSION, "--prefix", "Rk ", "components", "out"]
 
 
-def test_docker_command_refuses_folders_outside_the_mount(tmp_path, monkeypatch):
-    (tmp_path / "proj").mkdir()
-    monkeypatch.chdir(tmp_path / "proj")
-    with pytest.raises(SystemExit):
-        ghuser_dev.docker_command("../components", "dist-dev", None, "", "img:1")
+@pytest.fixture
+def components(tmp_path):
+    folder = tmp_path / "components"
+    (folder / "RingPoints").mkdir(parents=True)
+    (folder / "RingPoints" / "code.py").write_text(RING_POINTS)
+    (folder / "RingPoints" / "metadata.json").write_text('{"name": "Ring Points"}')
+    return folder
+
+
+class Component:
+    Message = ""
+
+
+class Env:
+    Component = Component()
+
+
+def run_component(path):
+    """Run a staged code.py as Rhino would, with Rhino's modules stubbed; returns RunScript's result."""
+    code = open(path, encoding="utf-8").read().replace("import Rhino.Geometry as rg", "rg = None")
+    code = code.replace("from ghpythonlib.componentbase import executingcomponent as component", "component = object")
+    code = code.replace("from ringkit import ring_points", "ring_points = lambda r: [r]")
+    scope = {"ghenv": Env()}
+    exec(compile(code, str(path), "exec"), scope)
+    return scope["RingPoints"]().RunScript(2)
+
+
+def test_a_staged_component_runs_while_the_stamps_agree_and_stops_when_they_do_not(tmp_path, components):
+    stamps = tmp_path / "dist-dev" / ghuser_dev.STAMPS
+    stamps.parent.mkdir()
+    prints = ghuser_dev.staging.stage(str(components), str(tmp_path / "staged"), "/src", str(stamps))
+    staged = tmp_path / "staged" / "RingPoints" / "code.py"
+    assert staged.read_text().startswith("# env: /src\n# ghuser-dev:")
+
+    def stops_with():
+        try:
+            run_component(staged)
+        except RuntimeError as e:
+            return str(e), Env.Component.Message
+        return None, Env.Component.Message
+
+    assert "no longer deployed" in stops_with()[0]  # no stamps: uninstalled
+    stamps.write_text(json.dumps(prints))
+    assert run_component(staged) == [2]
+    stamps.write_text(json.dumps({"RingPoints": dict(prints["RingPoints"], code="0")}))
+    assert stops_with() == ("ghuser-dev: code.py changed in the latest dev build; replace this component from the toolbar",
+                            "dev: replace")
+    stamps.write_text(json.dumps({"RingPoints": dict(prints["RingPoints"], interface="0")}))
+    assert "restart Rhino" in stops_with()[0] and Env.Component.Message == "dev: restart, replace"
+    stamps.write_text(json.dumps({}))
+    assert "removed or renamed" in stops_with()[0]
+    stamps.write_text(json.dumps(prints))
+    assert stops_with() == (None, "")  # running again clears the label
+
+
+def test_the_fingerprint_follows_code_and_parameters(tmp_path, components):
+    first = ghuser_dev.staging.stage(str(components), str(tmp_path / "a"), "/src", "/stamps")
+    assert ghuser_dev.staging.stage(str(components), str(tmp_path / "b"), "/src", "/stamps") == first
+    (components / "RingPoints" / "metadata.json").write_text('{"name": "Ring Points", "inputs": 2}')
+    second = ghuser_dev.staging.stage(str(components), str(tmp_path / "c"), "/src", "/stamps")
+    assert second["RingPoints"]["code"] == first["RingPoints"]["code"]
+    assert second["RingPoints"]["interface"] != first["RingPoints"]["interface"]
+    moved = ghuser_dev.staging.stage(str(components), str(tmp_path / "d"), "/elsewhere/src", "/stamps")
+    assert moved["RingPoints"]["code"] != second["RingPoints"]["code"]
+
+
+def test_changes_say_what_to_do_per_component():
+    a, b = {"code": "1", "interface": "1"}, {"code": "2", "interface": "1"}
+    c = {"code": "2", "interface": "2"}
+    notes = dict(ghuser_dev.changes({"Same": a, "Code": a, "Meta": a, "Gone": a}, {"Same": a, "Code": b, "Meta": c, "New": a}))
+    assert set(notes) == {"Code", "Meta", "Gone", "New"}
+    assert notes["Code"].startswith("code.py changed")
+    assert "restart Rhino, then replace" in notes["Meta"]
+    assert notes["New"].startswith("new") and notes["Gone"].startswith("removed")
+
+
+def test_uninstall_removes_the_stamps_so_placed_components_stop(uo, out):
+    (out / ghuser_dev.STAMPS).write_text("{}")
+    ghuser_dev.link(str(out), "tool-dev", str(uo))
+    ghuser_dev.uninstall(str(out), str(uo))
+    assert not (out / ghuser_dev.STAMPS).exists()
+    assert not ghuser_dev.links_to(str(out), str(uo))
 
 
 def test_a_folder_is_not_a_link_and_a_symlink_is(tmp_path, out):
