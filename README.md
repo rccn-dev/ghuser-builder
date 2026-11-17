@@ -47,15 +47,18 @@ To run the pipeline locally: [`gitlab-ci-local`](https://github.com/firecow/gitl
 ### On your machine
 
 ```bash
+docker build -t ghuser-builder:local .     # once, in this repo (or from its git URL)
 cp templates/local/ghuser <project>/scripts/ghuser
 scripts/ghuser --yak my-tool               # components/ -> dist/
 ```
 
-It runs `docker run` with the project folder mounted. Where mounting is not possible
+It runs `docker run` with the project folder mounted. On Windows, copy
+`templates/local/ghuser.py` instead and run `uv run scripts/ghuser.py --yak my-tool`.
+Either uses `ghuser-builder:local` unless `GHUSER_BUILDER_IMAGE` names another image. Where mounting is not possible
 (`act` on macOS, some Docker-in-Docker setups), [`templates/local/Dockerfile`](templates/local/Dockerfile)
 builds the same thing and exports it through BuildKit.
 
-### Dev builds on a Mac with Rhino 8 (no Docker)
+### Dev builds, linked into Grasshopper (macOS and Windows)
 
 ```bash
 uv run <ghuser-builder>/local/ghuser_dev.py deploy components dist-dev --env src
@@ -64,22 +67,29 @@ uv run <ghuser-builder>/local/ghuser_dev.py status dist-dev
 uv run <ghuser-builder>/local/ghuser_dev.py uninstall dist-dev
 ```
 
-Runs the same pinned componentizer on **Rhino 8's own .NET and GH_IO**, so files
-match the Rhino you load them in. `--env src` adds `# env: <abs path>` to each
-component: Rhino then imports your core library straight from the working copy, so
-you edit and recompute without reinstalling. A `# r: core=={{version}}` pin is left
-out of such a build, since `--env` provides that library.
+`--env src` adds `# env: <abs path>` to each component: Rhino then imports your
+core library straight from the working copy, so you edit and recompute without
+reinstalling. A `# r: core=={{version}}` pin is left out of such a build, since
+`--env` provides that library. Two builders:
+
+- `--builder rhino` (the default on a Mac with Rhino 8): the pinned componentizer on
+  **Rhino 8's own .NET and GH_IO**, no Docker. No canvas icon.
+- `--builder docker` (the default elsewhere): `ghuser-build --env` in the image
+  (`--image`, or `GHUSER_BUILDER_IMAGE`, default `ghuser-builder:local`). Full icons.
 
 `deploy` builds, links `dist-dev` into Grasshopper's User Object folder as
-`<folder>-dev` (`--name` to choose), and moves loose older copies of the same
+`<folder>-dev` (`--name` to choose; a junction on Windows, no admin needed), and moves loose older copies of the same
 components to `~/.cache/ghuser-builder/backups/`. It then checks the `# r:` requirements and the
 components' imports in Rhino's own Python (`--requirements` installs what is
-missing), and if Rhino is running, drops modules loaded from `--env`, recomputes
-the components on the canvas and names any that carry older code (`--no-reload`
-to skip). `status` says what Grasshopper will load and what collides.
+missing), and if Rhino is running, drops modules loaded from `--env`, recompiles and
+recomputes the components on the canvas, and names any that carry older code
+(`--no-reload` to skip). `status` says what Grasshopper will load and what collides,
+including an installed package with the same components: uninstall it while you develop.
 
-**Dev only:** no canvas icon (Rhino's macOS `System.Drawing` cannot create bitmaps
-outside Rhino), no `.yak`, version `0.0.0-dev.local`. Releases always come from CI.
+**Dev only:** no `.yak`, version `0.0.0-dev.local`, `# env:` paths that exist on one
+machine. A vendored core (scenario D) needs a header that does not fail when no
+package is installed; see [`examples/03`](examples/03-vendored-core). Releases always
+come from CI, or `scripts/ghuser` with a version.
 
 ### In a GitHub project
 
@@ -91,6 +101,7 @@ registry public.
 
 | Option | Env | Default |
 | --- | --- | --- |
+| `--env PATH` | `GHUSER_ENV` | none: dev build importing the core from `PATH`; no `.yak` |
 | `--version X.Y.Z` | `GHUSER_VERSION` | tag minus `v`; otherwise `0.0.0-dev.<pipeline>` |
 | `--prefix TEXT` | `GHUSER_PREFIX` | none: prepended to every component name |
 | `--yak NAME` | `GHUSER_YAK_NAME` | none: no `.yak` |
@@ -158,15 +169,18 @@ move together.
 | image builds (arm64, Docker 27); examples build, verify and package | ✅ `tests/run_examples.sh` |
 | verifier rejects a mismatched `.ghuser`, and one without a canvas icon | ✅ same script |
 | `local/ghuser_dev.py` with Rhino 8.36 (.NET 10) on macOS (arm64) | ✅ example 02 with `--env src` |
-| `ghuser_dev.py deploy` reload: drops `--env` modules, recomputes, flags stale canvas code | ✅ example 02 in a running Rhino 8.36 |
-| `ghuser_dev.py` link, backup, status, uninstall | ✅ `tests/test_ghuser_dev.py` |
+| `ghuser_dev.py deploy` reload: drops `--env` modules, recompiles, recomputes, flags stale canvas code | ✅ example 02 in Rhino 8.36; a core imported at the top of `code.py`, with typed inputs, in Rhino 8.37 |
+| `ghuser_dev.py --builder docker` and `ghuser-build --env` | ✅ macOS, image built locally; `tests/run_examples.sh` |
+| `ghuser_dev.py` link, backup, status, uninstall | ✅ `tests/test_ghuser_dev.py` (symlinks) |
+| `ghuser_dev.py` on Windows: junction, `%APPDATA%` paths, `rhinocode.exe`, Rhino's Python | ❌ written, not yet run on Windows |
+| `templates/local/ghuser.py` | ✅ macOS; ❌ Windows |
 | Grasshopper loads user objects through a symlinked folder | ❓ not yet checked by restarting Grasshopper |
 | core tests on Python 3.9; `uv version` + `uv build` give matching wheel versions | ✅ locally |
 | `sync_yak_feed.py`, `setup_lab_pip.py` | ✅ `tests/test_clients.py` against a fake GitLab API |
 | image builds with rootless BuildKit under the `image-build` runner's settings (seccomp/AppArmor unconfined, not privileged) | ✅ locally, same container settings |
 | BuildKit's push to the GitLab registry | ❓ not yet: first run on the new runner |
 | GitLab template | parses; **not yet run on git.rccn.dev** |
-| generated `.ghuser` / `.yak` load in Rhino 8 | ❌ **not yet tested in Rhino.** Do this before relying on it |
+| generated `.ghuser` / `.yak` load in Rhino 8 | ✅ macOS, Rhino 8.37: `.yak` installed with `yak install`, vendored core imported from the package's `lib/`; ❌ Windows |
 | Rhino's pip honours the user pip config (scenario C) | ❌ to verify on one machine |
 | Rhino 8 accepts a folder as a package source; package install path (scenario D) | ❌ to verify on Windows and macOS |
 | `registry.rccn.dev/libs/ghuser-builder:1.0.0` in `templates/local/*` | ❓ not published yet: no `v1.0.0` tag, so the release job has not run |

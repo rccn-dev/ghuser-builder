@@ -10,6 +10,10 @@
 #   --yak NAME            also write NAME-VERSION-<dist>.yak into <out-dir>            [GHUSER_YAK_NAME]
 #   --yak-manifest FILE   fields for manifest.yml (default: ./yak.json if present)     [GHUSER_YAK_MANIFEST]
 #   --yak-include SRC:DST copy SRC into the package at DST; repeatable                [GHUSER_YAK_INCLUDE, space-separated]
+#   --env PATH            dev build: prepend `# env: PATH` to every code.py, so Rhino   [GHUSER_ENV]
+#                         imports the core from PATH on the user's machine (an absolute
+#                         path there, not checked here); drops `# r:` pins on {{version}}.
+#                         Version 0.0.0-dev.local unless given; no --yak.
 #
 # Output: <out-dir>/ghuser/*.ghuser, plus <out-dir>/*.yak with --yak.
 # Exit code is non-zero if packaging or verification fails; nothing is half-written
@@ -21,9 +25,10 @@ VERSION="${GHUSER_VERSION:-}"
 PREFIX="${GHUSER_PREFIX:-}"
 YAK="${GHUSER_YAK_NAME:-}"
 MANIFEST="${GHUSER_YAK_MANIFEST:-}"
+ENV_PATH="${GHUSER_ENV:-}"
 read -r -a INCLUDES <<< "${GHUSER_YAK_INCLUDE:-}"
 
-usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; }
 
 ARGS=()
 while [[ $# -gt 0 ]]; do
@@ -33,6 +38,7 @@ while [[ $# -gt 0 ]]; do
     --yak) YAK="$2"; shift 2 ;;
     --yak-manifest) MANIFEST="$2"; shift 2 ;;
     --yak-include) INCLUDES+=("$2"); shift 2 ;;
+    --env) ENV_PATH="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "ghuser-build: unknown option $1" >&2; exit 2 ;;
     *) ARGS+=("$1"); shift ;;
@@ -42,6 +48,12 @@ done
 SRC="${ARGS[0]}"; OUT="${ARGS[1]}"
 
 [[ -d "$SRC" ]] || { echo "no components directory: $SRC" >&2; exit 2; }
+
+if [[ -n "$ENV_PATH" ]]; then
+  # A dev build points at one machine's working copy: never a package.
+  [[ -z "$YAK" ]] || { echo "ghuser-build: --env is a dev build; it cannot make a .yak" >&2; exit 2; }
+  VERSION="${VERSION:-0.0.0-dev.local}"
+fi
 
 if [[ -z "$VERSION" ]]; then
   TAG="${CI_COMMIT_TAG:-}"
@@ -60,6 +72,14 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
 echo "ghuser-build  version=$VERSION  GH_IO=${GHUSER_GH_VERSION:-?}  componentizer=${GHUSER_COMPONENTIZER_SHA:0:7}"
+
+if [[ -n "$ENV_PATH" ]]; then
+  # The componentizer embeds code.py verbatim, so change a copy; the verifier then
+  # checks the files against exactly what went in.
+  python3 "$TOOLS/dev_code.py" --env "$ENV_PATH" "$SRC" "$STAGE/components"
+  SRC="$STAGE/components"
+  echo "ghuser-build  dev build: components import from $ENV_PATH"
+fi
 
 PREFIX_ARGS=()
 [[ -n "$PREFIX" ]] && PREFIX_ARGS=(--prefix "$PREFIX")

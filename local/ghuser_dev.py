@@ -2,20 +2,25 @@
 # requires-python = ">=3.10"
 # dependencies = ["pythonnet==3.0.5"]
 # ///
-"""Development builds of .ghuser components with the Rhino 8 installed on this Mac.
+"""Development builds of .ghuser components, linked into Grasshopper on this machine.
 
     uv run <ghuser-builder>/local/ghuser_dev.py build components dist-dev [--env src]
     uv run <ghuser-builder>/local/ghuser_dev.py deploy components dist-dev [--env src]
     uv run <ghuser-builder>/local/ghuser_dev.py status dist-dev
     uv run <ghuser-builder>/local/ghuser_dev.py uninstall dist-dev
 
-No Docker: it runs the same pinned componentizer on Rhino 8's own .NET runtime
-and GH_IO.dll, so the files match exactly the Rhino you will load them in.
+macOS and Windows, Rhino 8. Two builders (--builder):
+  rhino   macOS only, no Docker: the same pinned componentizer on Rhino 8's own
+          .NET and GH_IO.dll, so files match exactly the Rhino you load them in.
+          No canvas icon. The default on a Mac with Rhino 8 in /Applications.
+  docker  any OS: `ghuser-build --env` in the builder image (--image, or
+          GHUSER_BUILDER_IMAGE). Full icons; the pinned GH_IO of the image.
+          The default everywhere else. src and out must be inside the current folder.
 `ghuser_dev.py components dist-dev` (no command) is `build`, as before.
 
 build      componentize and verify into OUT, replacing what was there.
 deploy     build, then link OUT into Grasshopper's User Object folder as NAME
-           (default: <current folder>-dev). Loose copies of the same components
+           (default: <current folder>-dev; a junction on Windows). Loose copies of the same components
            elsewhere in that folder move to ~/.cache/ghuser-builder/backups/<time>/, so
            Grasshopper loads one of each. Then checks, in Rhino's own Python, the
            `# r:` requirements and that what the components import imports; with
@@ -23,7 +28,8 @@ deploy     build, then link OUT into Grasshopper's User Object folder as NAME
            components on the canvas, listing any that carry older code.
              --requirements  install missing `# r:` packages into Rhino, visibly
              --no-reload     leave a running Rhino alone
-status     where OUT is linked, and anything that will go wrong when it loads.
+status     where OUT is linked, and anything that will go wrong when it loads,
+           including an installed package carrying the same components.
 uninstall  remove the links to OUT. Backups stay where deploy put them.
 
 --env PATH   prepends `# env: <absolute PATH>` to every component, so Rhino imports
@@ -34,14 +40,15 @@ uninstall  remove the links to OUT. Backups stay where deploy put them.
              is on no index.
 
 DEV ONLY, by design:
-  * no canvas icon: Rhino's macOS System.Drawing cannot create a bitmap outside a
-    running Rhino, so components show the default script icon on the canvas (the
-    toolbar icon is unaffected);
+  * with the rhino builder, no canvas icon: Rhino's macOS System.Drawing cannot
+    create a bitmap outside a running Rhino, so components show the default script
+    icon on the canvas (the toolbar icon is unaffected);
   * no .yak, and the version is always 0.0.0-dev.local;
   * `# env:` paths only exist on this machine.
 Releases come from CI (ghuser-build in the Linux image), which has full icons.
 
-GHUSER_USEROBJECTS and GHUSER_BACKUPS override the User Object and backup folders (tests use them).
+GHUSER_USEROBJECTS, GHUSER_PACKAGES and GHUSER_BACKUPS override the User Object,
+installed-package and backup folders (tests use them).
 """
 
 import argparse
@@ -51,6 +58,7 @@ import os
 import platform
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -59,13 +67,28 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOLS = os.path.join(os.path.dirname(HERE), "tools")
+sys.path.insert(0, TOOLS)
+from dev_code import bundles, dev_code, env_header, split_requirements  # noqa: E402
+
+WINDOWS = platform.system() == "Windows"
 RHINO = "/Applications/Rhino 8.app/Contents/Frameworks/RhCore.framework/Versions/A/Resources"
-RHINOCODE = "/Applications/Rhino 8.app/Contents/Resources/bin/rhinocode"
-RHINO_PYTHON = os.path.expanduser("~/.rhinocode/py39-rh8")
-USER_OBJECTS = os.path.expanduser(
-    "~/Library/Application Support/McNeel/Rhinoceros/8.0/Plug-ins/"
-    "Grasshopper (b45a29b1-4343-4035-989e-044e8580d9cf)/UserObjects"
-)
+RHINO_PYTHON = os.path.expanduser("~/.rhinocode/py39-rh8")  # the same place on Windows
+if WINDOWS:
+    _APPDATA = os.environ.get("APPDATA", os.path.expanduser("~/AppData/Roaming"))
+    _PROGRAMS = os.environ.get("ProgramFiles", r"C:\Program Files")
+    RHINOCODE = os.path.join(_PROGRAMS, "Rhino 8", "System", "rhinocode.exe")
+    PYTHON_EXE = "python.exe"
+    USER_OBJECTS = os.path.join(_APPDATA, "Grasshopper", "UserObjects")
+    PACKAGES = os.path.join(_APPDATA, "McNeel", "Rhinoceros", "packages", "8.0")
+else:
+    RHINOCODE = "/Applications/Rhino 8.app/Contents/Resources/bin/rhinocode"
+    PYTHON_EXE = "python3.9"
+    USER_OBJECTS = os.path.expanduser(
+        "~/Library/Application Support/McNeel/Rhinoceros/8.0/Plug-ins/"
+        "Grasshopper (b45a29b1-4343-4035-989e-044e8580d9cf)/UserObjects"
+    )
+    PACKAGES = os.path.expanduser("~/Library/Application Support/McNeel/Rhinoceros/packages/8.0")
+IMAGE = "ghuser-builder:local"
 VERSION = "0.0.0-dev.local"
 ICON_LINES = (
     "    bitmap_icon = System.Drawing.Bitmap.FromStream(System.IO.MemoryStream(icon))\n"
@@ -104,7 +127,7 @@ def load_componentizer(sha):
 
 def start_rhino_dotnet():
     if platform.system() != "Darwin":
-        sys.exit("ghuser_dev: macOS with Rhino 8 only. Elsewhere, use the Docker image (templates/local/ghuser).")
+        sys.exit("ghuser_dev: --builder rhino is macOS only; use --builder docker")
     if not os.path.isdir(RHINO):
         sys.exit(f"ghuser_dev: Rhino 8 not found at {RHINO}")
     os.environ["DOTNET_ROOT"] = os.path.join(RHINO, "dotnet", platform.machine())
@@ -128,34 +151,6 @@ def start_rhino_dotnet():
 # --- sources -------------------------------------------------------------------
 
 
-def bundles(src):
-    return sorted(
-        d for d in os.listdir(src)
-        if os.path.isdir(os.path.join(src, d)) and d not in ("__pycache__", ".git")
-    )
-
-
-def split_requirements(line):
-    """`numpy>=1,<2, scipy` -> ['numpy>=1,<2', 'scipy']: a comma starts a new one only before a name."""
-    return [r.strip() for r in re.split(r",\s*(?=[A-Za-z])", line) if r.strip()]
-
-
-def dev_code(code, header):
-    """code.py as a dev build embeds it: the `# env:` header, and with it no `# r:` pin on {{version}}."""
-    if not header:
-        return code
-    lines = []
-    for line in code.splitlines(keepends=True):
-        m = re.match(r"#\s*r\s*:(.*)$", line.rstrip("\r\n"))
-        if m and "{{version}}" in m.group(1):
-            kept = [r for r in split_requirements(m.group(1)) if "{{version}}" not in r]
-            if not kept:
-                continue
-            line = "# r: " + ", ".join(kept) + "\n"
-        lines.append(line)
-    return header + "".join(lines)
-
-
 def requirements(code):
     return [r for line in code.splitlines() for m in [re.match(r"#\s*r\s*:(.*)$", line)] if m
             for r in split_requirements(m.group(1))]
@@ -175,36 +170,94 @@ def imported_modules(code):
 # --- build ---------------------------------------------------------------------
 
 
-def build(src, out, env=None, prefix=""):
-    """Build and verify into out. Returns {component name: embedded code} for deploy."""
+def default_builder():
+    return "rhino" if platform.system() == "Darwin" and os.path.isdir(RHINO) else "docker"
+
+
+def embedded_code(src, env, prefix=""):
+    """{component name: code} as a dev build embeds it, to compare with the canvas."""
+    import verify_ghuser
+
+    embedded = {}
+    for d in bundles(src):
+        code_py = os.path.join(src, d, "code.py")
+        if os.path.isfile(code_py):
+            text = dev_code(open(code_py, encoding="utf-8").read(), env_header(env))
+            meta = json.load(open(os.path.join(src, d, "metadata.json"), encoding="utf-8"))
+            embedded[prefix + meta["name"]] = verify_ghuser.expected_code(text, VERSION, meta["name"], d + ".ghuser")
+    return embedded
+
+
+def build_with_rhino(src, built, env, prefix):
     System, GH_LooseChunk = start_rhino_dotnet()
     cz = load_componentizer(componentizer_sha())
-    sys.path.insert(0, TOOLS)
+    import dev_code as staging
     import verify_ghuser
 
     verify_ghuser.use_ghio(System, GH_LooseChunk)
-    header = f"# env: {os.path.abspath(env)}\n" if env else ""
-    embedded = {}
-
     with tempfile.TemporaryDirectory() as stage:
-        work = os.path.join(stage, "components")
-        shutil.copytree(src, work, ignore=shutil.ignore_patterns("__pycache__"))
-        # The componentizer embeds code.py verbatim, so change the copy; the
+        # The componentizer embeds code.py verbatim, so change a copy; the
         # verifier then checks the files against exactly what went in.
-        for d in bundles(work):
-            code = os.path.join(work, d, "code.py")
-            if os.path.isfile(code):
-                text = dev_code(open(code, encoding="utf-8").read(), header)
-                open(code, "w", encoding="utf-8").write(text)
-                meta = json.load(open(os.path.join(work, d, "metadata.json"), encoding="utf-8"))
-                embedded[prefix + meta["name"]] = verify_ghuser.expected_code(
-                    text, VERSION, meta["name"], d + ".ghuser")
-        built = os.path.join(stage, "ghuser")
-        os.makedirs(built)
+        work = os.path.join(stage, "components")
+        staging.stage(src, work, env)
         for d in bundles(work):
             cz.create_ghuser_component(os.path.join(work, d), os.path.join(built, d + ".ghuser"), VERSION, prefix or None)
         if not verify_ghuser.verify_all(work, built, VERSION, prefix, canvas_icon=False):
             sys.exit(1)
+
+
+def inside_cwd(path):
+    rel = os.path.relpath(os.path.abspath(path), os.getcwd())
+    if rel == os.pardir or rel.startswith(os.pardir + os.sep):
+        sys.exit(f"ghuser_dev: --builder docker mounts the current folder; {path} is outside it")
+    return rel.replace(os.sep, "/")
+
+
+def docker_command(src, stage, env, prefix, image):
+    """`docker run` for ghuser-build in the image, with the current folder mounted at /work."""
+    cmd = ["docker", "run", "--rm", "-v", f"{os.getcwd()}:/work", "-w", "/work", "-e", "HOME=/tmp"]
+    if hasattr(os, "getuid"):  # files in the mount belong to you, not root (not on Windows)
+        cmd += ["-u", f"{os.getuid()}:{os.getgid()}"]
+    cmd += [image, "ghuser-build", "--version", VERSION]
+    if env:
+        cmd += ["--env", env]
+    if prefix:
+        cmd += ["--prefix", prefix]
+    return cmd + [inside_cwd(src), inside_cwd(stage)]
+
+
+def build_with_docker(src, built, env, prefix, image):
+    stage = os.path.join(os.getcwd(), ".ghuser-dev-stage")
+    shutil.rmtree(stage, ignore_errors=True)
+    try:
+        try:
+            run = subprocess.run(docker_command(src, stage, env, prefix, image), capture_output=True, text=True)
+        except FileNotFoundError:
+            sys.exit("ghuser_dev: docker not found; install Docker Desktop (or OrbStack, colima) and start it")
+        if run.returncode:
+            sys.exit(f"{run.stdout}{run.stderr}\nghuser_dev: ghuser-build in {image} failed. No image? Build it once:\n"
+                     f"  docker build -t {image} <ghuser-builder checkout or git URL>")
+        # Mono's warnings and the componentizer's progress are noise when it worked.
+        for line in run.stdout.splitlines():
+            if line.startswith(("[verified]", "ghuser-build  version")):
+                print(line)
+        for f in os.listdir(os.path.join(stage, "ghuser")):
+            shutil.copy2(os.path.join(stage, "ghuser", f), os.path.join(built, f))
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+
+
+def build(src, out, env=None, prefix="", builder=None, image=None):
+    """Build and verify into out. Returns {component name: embedded code} for deploy."""
+    builder = builder or default_builder()
+    env = os.path.abspath(env) if env else None
+    with tempfile.TemporaryDirectory() as tmp:
+        built = os.path.join(tmp, "ghuser")
+        os.makedirs(built)
+        if builder == "rhino":
+            build_with_rhino(src, built, env, prefix)
+        else:
+            build_with_docker(src, built, env, prefix, image or os.environ.get("GHUSER_BUILDER_IMAGE") or IMAGE)
         # Replace, not add: a removed or renamed component must not keep loading.
         os.makedirs(out, exist_ok=True)
         for f in os.listdir(out):
@@ -213,9 +266,10 @@ def build(src, out, env=None, prefix=""):
         for f in os.listdir(built):
             shutil.copy2(os.path.join(built, f), os.path.join(out, f))
 
-    print(f"ghuser_dev: wrote {out}/ (dev build: version {VERSION}, no canvas icon"
-          + (f", imports from {os.path.abspath(env)})" if env else ")"))
-    return embedded
+    print(f"ghuser_dev: wrote {out}/ (dev build with {builder}: version {VERSION}"
+          + (", no canvas icon" if builder == "rhino" else "")
+          + (f", imports from {env})" if env else ")"))
+    return embedded_code(src, env, prefix)
 
 
 # --- Grasshopper's User Object folder -------------------------------------------
@@ -225,23 +279,65 @@ def user_objects():
     return os.environ.get("GHUSER_USEROBJECTS") or USER_OBJECTS
 
 
+def packages():
+    return os.environ.get("GHUSER_PACKAGES") or PACKAGES
+
+
+# A link is a symlink on macOS and a directory junction on Windows, which needs
+# neither admin rights nor Developer Mode. os.path.islink() is False for a junction.
+
+
+def is_link(path):
+    if os.path.islink(path):
+        return True
+    try:
+        return getattr(os.lstat(path), "st_reparse_tag", None) == getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", -1)
+    except OSError:
+        return False
+
+
+def make_link(out, target):
+    if WINDOWS:
+        import _winapi
+
+        _winapi.CreateJunction(out, target)
+    else:
+        os.symlink(out, target)
+
+
+def remove_link(path):
+    # rmdir removes a junction without touching what it points at; unlink a symlink.
+    if WINDOWS and not os.path.islink(path):
+        os.rmdir(path)
+    else:
+        os.unlink(path)
+
+
 def links_to(out, uo):
     """Entries of uo that are links to out."""
     if not os.path.isdir(uo):
         return []
     want = os.path.realpath(out)
     return sorted(e for e in os.listdir(uo)
-                  if os.path.islink(os.path.join(uo, e)) and os.path.realpath(os.path.join(uo, e)) == want)
+                  if is_link(os.path.join(uo, e)) and os.path.realpath(os.path.join(uo, e)) == want)
 
 
 def ghuser_files(uo, follow):
     """{file name: [paths]} for every .ghuser under uo, through links when follow."""
     found = {}
     for dirpath, dirnames, filenames in os.walk(uo, followlinks=follow):
+        if not follow:  # os.walk would go through a junction
+            dirnames[:] = [d for d in dirnames if not is_link(os.path.join(dirpath, d))]
         for f in filenames:
             if f.endswith(".ghuser"):
                 found.setdefault(f, []).append(os.path.join(dirpath, f))
     return found
+
+
+def installed_copies(names, root):
+    """{file name: [paths]} for .ghuser files in names that an installed package also carries."""
+    found = ghuser_files(root, follow=False) if os.path.isdir(root) else {}
+    return {f: ps for f, ps in found.items() if f in names}
 
 
 def backup(uo, paths):
@@ -253,7 +349,7 @@ def backup(uo, paths):
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         shutil.move(p, dest)
         parent = os.path.dirname(p)
-        while parent != uo and os.path.isdir(parent) and not os.path.islink(parent) and not os.listdir(parent):
+        while parent != uo and os.path.isdir(parent) and not is_link(parent) and not os.listdir(parent):
             os.rmdir(parent)
             parent = os.path.dirname(parent)
     return root
@@ -267,16 +363,16 @@ def link(out, name, uo):
     target = os.path.join(uo, name)
     for other in links_to(out, uo):
         if other != name:
-            os.unlink(os.path.join(uo, other))
+            remove_link(os.path.join(uo, other))
             notes.append(f"removed the older link {other}")
-    if os.path.islink(target):
+    if is_link(target):
         if os.path.realpath(target) != os.path.realpath(out):
-            notes.append(f"{name} pointed at {os.readlink(target)}; now {out}")
-            os.unlink(target)
+            notes.append(f"{name} pointed at {os.path.realpath(target)}; now {out}")
+            remove_link(target)
     elif os.path.exists(target):
         notes.append(f"{name} was a folder; moved to {backup(uo, [target])}")
-    if not os.path.islink(target):
-        os.symlink(out, target)
+    if not is_link(target):
+        make_link(out, target)
 
     mine = {f for f in os.listdir(out) if f.endswith(".ghuser")}
     # Loose copies are ours to move; files behind someone else's link belong to
@@ -305,11 +401,14 @@ def status(out, uo):
         problems.append(f"{out} holds no .ghuser files; run build or deploy")
     if os.path.isdir(uo):
         for e in sorted(os.listdir(uo)):
-            if os.path.islink(os.path.join(uo, e)) and not os.path.exists(os.path.join(uo, e)):
+            if is_link(os.path.join(uo, e)) and not os.path.exists(os.path.join(uo, e)):
                 problems.append(f"{e} is a link to {os.readlink(os.path.join(uo, e))}, which is gone")
         for f, ps in sorted(ghuser_files(uo, follow=True).items()):
             if len(ps) > 1:
                 problems.append(f"{f} loads {len(ps)} times: {', '.join(ps)}")
+    for f, ps in sorted(installed_copies(set(built), packages()).items()):
+        problems.append(f"{f} is also in an installed package ({', '.join(ps)}): Grasshopper loads both;"
+                        " uninstall the package in the Package Manager while you develop")
     for p in problems:
         print(f"ghuser_dev: PROBLEM {p}")
     if not problems:
@@ -320,7 +419,7 @@ def status(out, uo):
 def uninstall(out, uo):
     names = links_to(out, uo)
     for n in names:
-        os.unlink(os.path.join(uo, n))
+        remove_link(os.path.join(uo, n))
         print(f"ghuser_dev: removed {os.path.join(uo, n)}")
     if not names:
         print(f"ghuser_dev: {out} is not linked in {uo}")
@@ -367,10 +466,10 @@ def site_env():
 
 def check_rhino_python(src, env, install):
     """Check requirements and imports in Rhino's own CPython. Returns the problems."""
-    python, site = os.path.join(RHINO_PYTHON, "python3.9"), site_env()
+    python, site = os.path.join(RHINO_PYTHON, PYTHON_EXE), site_env()
     if not os.path.isfile(python) or not site:
         return [f"Rhino's Python not found at {RHINO_PYTHON}: start Rhino 8 once and open the ScriptEditor"]
-    header = f"# env: {os.path.abspath(env)}\n" if env else ""
+    header = env_header(os.path.abspath(env) if env else None)
     reqs, mods = set(), set()
     for d in bundles(src):
         code_py = os.path.join(src, d, "code.py")
@@ -407,13 +506,34 @@ def check_rhino_python(src, env, install):
 # --- a running Rhino -----------------------------------------------------------
 
 RELOAD = r"""
-import base64, json, os, sys
+import ast, base64, json, os, sys
 ENV, CODE, REPORT = %r, %r, %r
 result = {"dropped": [], "recomputed": [], "stale": [], "error": None}
+
+
+def same_code(a, b):
+    # Placing a component writes its inputs' type hints into RunScript's signature,
+    # so compare without annotations; comments too, since `# env:` and `# r:` matter.
+    def key(code):
+        try:
+            tree = ast.parse(code)
+        except SyntaxError:
+            return code
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                node.returns = None
+                args = node.args
+                for arg in args.posonlyargs + args.args + args.kwonlyargs + [args.vararg, args.kwarg]:
+                    if arg is not None:
+                        arg.annotation = None
+        comments = [line.strip() for line in code.splitlines() if line.strip().startswith("#")]
+        return ast.dump(tree), comments
+    return key(a) == key(b)
+
 if ENV:
     for name, module in list(sys.modules.items()):
         path = getattr(module, "__file__", None)
-        if path and os.path.realpath(path).startswith(ENV + os.sep):
+        if path and os.path.normcase(os.path.realpath(path)).startswith(os.path.normcase(ENV) + os.sep):
             del sys.modules[name]
             result["dropped"].append(name)
 try:
@@ -428,9 +548,15 @@ try:
         obj.Write(chunk)
         script = chunk.FindChunk("Script")
         code = base64.b64decode(script.GetString("Text")).decode("utf-8") if script else None
-        if code is not None and code.replace("\r\n", "\n") != CODE[obj.Name]:
+        if code is not None and not same_code(code.replace("\r\n", "\n"), CODE[obj.Name]):
             result["stale"].append(obj.NickName or obj.Name)
         else:
+            # A script component keeps the globals it compiled, so a core imported at
+            # the top of code.py stays old; setting the same source recompiles it.
+            if hasattr(obj, "TryGetSource"):
+                ok, source = obj.TryGetSource()
+                if ok:
+                    obj.SetSource(source)
             obj.ExpireSolution(False)
             result["recomputed"].append(obj.NickName or obj.Name)
     if result["recomputed"]:
@@ -480,7 +606,7 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else list(argv)
     if argv and argv[0] not in COMMANDS and not argv[0].startswith("-"):
         argv.insert(0, "build")  # the original form: ghuser_dev.py SRC OUT
-    ap = argparse.ArgumentParser(description="Dev builds with the installed Rhino 8 (macOS).")
+    ap = argparse.ArgumentParser(description="Dev builds of .ghuser components, linked into Grasshopper.")
     sub = ap.add_subparsers(dest="command", required=True)
     for name in ("build", "deploy"):
         p = sub.add_parser(name)
@@ -488,6 +614,8 @@ def main(argv=None):
         p.add_argument("out", help="output folder (e.g. build/ghuser-dev)")
         p.add_argument("--env", help="folder to put on Rhino's sys.path via `# env:` (e.g. src)")
         p.add_argument("--prefix", default="")
+        p.add_argument("--builder", choices=("rhino", "docker"), help=f"default here: {default_builder()}")
+        p.add_argument("--image", help=f"builder image for --builder docker (default: $GHUSER_BUILDER_IMAGE or {IMAGE})")
     deploy = sub.choices["deploy"]
     deploy.add_argument("--name", help="link name in the User Object folder (default: <current folder>-dev)")
     deploy.add_argument("--requirements", action="store_true", help="install missing `# r:` packages into Rhino")
@@ -502,7 +630,7 @@ def main(argv=None):
     if a.command == "uninstall":
         return uninstall(a.out, uo)
 
-    embedded = build(a.src, a.out, a.env, a.prefix)
+    embedded = build(a.src, a.out, a.env, a.prefix, a.builder, a.image)
     if a.command == "build":
         print("ghuser_dev: point Grasshopper at it with `deploy`, or link it into the User Object folder")
         return

@@ -116,6 +116,40 @@ def test_status_reports_duplicates_and_broken_links_then_uninstall(tmp_path, uo,
 
 def test_the_original_command_line_still_means_build(monkeypatch):
     seen = {}
-    monkeypatch.setattr(ghuser_dev, "build", lambda src, out, env, prefix: seen.update(src=src, out=out, env=env))
+    monkeypatch.setattr(ghuser_dev, "build", lambda src, out, env, *rest: seen.update(src=src, out=out, env=env))
     ghuser_dev.main(["components", "dist-dev", "--env", "src"])
     assert seen == {"src": "components", "out": "dist-dev", "env": "src"}
+
+
+def test_docker_command_mounts_the_current_folder_and_passes_the_host_env_path(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    cmd = ghuser_dev.docker_command("components", str(tmp_path / ".stage"), "/home/me/proj/src", "", "img:1")
+    assert cmd[:6] == ["docker", "run", "--rm", "-v", f"{tmp_path}:/work", "-w"]
+    i = cmd.index("img:1")
+    assert cmd[i:] == ["img:1", "ghuser-build", "--version", ghuser_dev.VERSION,
+                       "--env", "/home/me/proj/src", "components", ".stage"]
+
+
+def test_docker_command_refuses_folders_outside_the_mount(tmp_path, monkeypatch):
+    (tmp_path / "proj").mkdir()
+    monkeypatch.chdir(tmp_path / "proj")
+    with pytest.raises(SystemExit):
+        ghuser_dev.docker_command("../components", "dist-dev", None, "", "img:1")
+
+
+def test_a_folder_is_not_a_link_and_a_symlink_is(tmp_path, out):
+    (tmp_path / "plain").mkdir()
+    (tmp_path / "link").symlink_to(out)
+    assert not ghuser_dev.is_link(str(tmp_path / "plain"))
+    assert ghuser_dev.is_link(str(tmp_path / "link"))
+    assert not ghuser_dev.is_link(str(tmp_path / "missing"))
+
+
+def test_status_names_components_an_installed_package_also_carries(tmp_path, uo, out, monkeypatch):
+    pk = tmp_path / "packages" / "my-tool" / "1.0.0"
+    pk.mkdir(parents=True)
+    (pk / "A.ghuser").write_text("released")
+    monkeypatch.setenv("GHUSER_PACKAGES", str(tmp_path / "packages"))
+    ghuser_dev.link(str(out), "tool-dev", str(uo))
+    problems = ghuser_dev.status(str(out), str(uo))
+    assert len(problems) == 1 and problems[0].startswith("A.ghuser is also in an installed package")

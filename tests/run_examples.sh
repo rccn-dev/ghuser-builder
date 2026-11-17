@@ -46,6 +46,23 @@ echo "== untagged builds get a dev version that is valid semver and PEP 440"
 (cd "$WORK/01-standalone" && env -u CI_COMMIT_TAG CI_PIPELINE_IID=42 ghuser-build --yak rccn-spiral components dist-dev)
 [[ -f "$WORK/01-standalone/dist-dev/rccn-spiral-0.0.0-dev.42-rh8_0-any.yak" ]] || fail "dev version naming"
 
+echo "== a dev build embeds the # env: path, drops the {{version}} pin, and makes no .yak"
+(cd "$WORK/02-with-core" && ghuser-build --env 'C:\Users\me\proj\src' components dist-env)
+python3 - "$WORK/02-with-core/dist-env/ghuser" <<'PY' || fail "dev build code"
+import base64, glob, sys
+import clr
+clr.AddReference("/opt/ghio/GH_IO")
+from GH_IO.Serialization import GH_LooseChunk
+import System
+for path in glob.glob(sys.argv[1] + "/*.ghuser"):
+    root = GH_LooseChunk("UserObject"); root.Deserialize_Binary(System.IO.File.ReadAllBytes(path))
+    inner = GH_LooseChunk("UserObject"); inner.Deserialize_Binary(root.GetByteArray("Object"))
+    code = base64.b64decode(inner.FindChunk("Script").GetString("Text")).decode()
+    assert code.startswith("# env: C:\\Users\\me\\proj\\src\n"), code[:60]
+    assert "ringkit==" not in code, "version pin kept"
+PY
+(cd "$WORK/02-with-core" && ghuser-build --env /src --yak x components dist-env 2>/dev/null) && fail "--env made a .yak"
+
 echo "== make_yak rejects bad input"
 python3 /opt/ghuser-builder/tools/make_yak.py --name ok --version 1.2 "$WORK/01-standalone/dist/ghuser" "$WORK" 2>/dev/null \
   && fail "accepted non-semver version"
