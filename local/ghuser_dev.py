@@ -1,5 +1,5 @@
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.10,<3.14"   # pythonnet 3.0.5 supports up to 3.13
 # dependencies = ["pythonnet==3.0.5"]
 # ///
 """Development builds of .ghuser components, linked into Grasshopper on this machine.
