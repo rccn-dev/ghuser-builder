@@ -23,6 +23,24 @@ the tested image to `$CI_REGISTRY_IMAGE:X.Y.Z` with crane. It refuses a tag that
 match `templates/gitlab/ghuser.gitlab-ci.yml`. Then bump `[tool.ghuser] builder` in
 ghuser-template (and in projects made from it, on purpose).
 
+## Planned for 1.3.0
+
+After the 2026-11-18 class (moving the pin then makes every lab PC rebuild the image):
+
+- **One local client, here.** The tar-stream run, `IN_IMAGE`, and telling Docker Desktop,
+  colima and OrbStack apart move from ghuser-template's `scripts/_builder.py` into
+  `local/`, used by both `ghuser_dev.py` and a release build. The template's scripts shrink
+  to: read `[tool.ghuser]`, fetch the pinned release, hand over.
+- **The component checks fail the build.** `RunScript` names the inputs in
+  `metadata.json` and returns one value per output; `typeHintID`, `scriptParamAccess` and
+  `exposure` take values the componentizer accepts (read from it, not copied); the adapter
+  imports `Grasshopper`, `Rhino` and `System`; the icon is 24 × 24. They now live in the
+  template's `tests/test_components.py`, so only projects that copied it get them; the
+  template keeps the checks that are its own (class name = folder, `PACKAGE` = `yak-name`).
+- **Removed:** `templates/local/ghuser`, `templates/local/ghuser.py`,
+  `templates/github/build-ghuser.yml`.
+- Then ghuser-template, `plugin_set` and projects made from the template move to 1.3.0.
+
 ## Runner for image builds
 
 Only the `image:build` job needs more than an ordinary runner: one extra runner, tagged

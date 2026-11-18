@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Superseded by ghuser-template's scripts/ghuser.py (tar stream, no mount); removed in 1.3.0.
 # Run ghuser-build on this machine, in the same image CI uses.
 # Copy into a project (e.g. scripts/ghuser) and run from the project root:
 #

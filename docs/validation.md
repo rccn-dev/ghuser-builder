@@ -90,8 +90,8 @@ Update this after every release check: system, Rhino version, date.
 | reload drops a core of the same name left by an installed `.yak` | ✅ Rhino 8.37, macOS |
 | `ghuser_dev.py --builder docker` (tar stream) and `ghuser-build --env` | ✅ macOS, colima with sshfs (5 quick size-changing edits, all verified); `tests/run_examples.sh` |
 | `ghuser_dev.py` link, backup, status, uninstall | ✅ `tests/test_ghuser_dev.py` (symlinks) |
-| `ghuser_dev.py` on Windows: junction, `%APPDATA%` paths, `rhinocode.exe`, Rhino's Python | ✅ lab PC, 1.1.0 (ghuser-template's dev loop); ❓ 1.2.0's stale check and tar stream |
-| `templates/local/ghuser.py` | ✅ macOS; ❌ Windows |
+| `ghuser_dev.py` on Windows: junction, `%APPDATA%` paths, `rhinocode.exe`, Rhino's Python | ✅ lab PC, 1.1.0 (ghuser-template's dev loop); ✅ lab PC, 1.2.1, ghuser-template's dev loop by hand, 2026-11-18; ❓ `tests/rhino/run_scenarios.py` |
+| `templates/local/ghuser.py` (superseded) | ✅ macOS; ❌ Windows |
 | Grasshopper loads user objects through a symlinked folder | ❓ not yet checked by restarting Grasshopper |
 | core tests on Python 3.9; `uv version` + `uv build` give matching wheel versions | ✅ locally |
 | `sync_yak_feed.py`, `setup_lab_pip.py` | ✅ `tests/test_clients.py` against a fake GitLab API |

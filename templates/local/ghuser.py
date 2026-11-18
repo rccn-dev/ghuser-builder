@@ -1,5 +1,7 @@
 """Run ghuser-build on this machine, in the same image CI uses. Any OS with Docker.
 
+Superseded by ghuser-template's scripts/ghuser.py (tar stream, no mount); removed in 1.3.0.
+
 Copy into a project (e.g. scripts/ghuser.py) and run from the project root:
 
     uv run scripts/ghuser.py                         # components/ -> dist/, dev version

@@ -11,6 +11,9 @@ uv run <ghuser-builder>/local/ghuser_dev.py status dist-dev
 uv run <ghuser-builder>/local/ghuser_dev.py uninstall dist-dev
 ```
 
+In a project made from ghuser-template, `uv run scripts/dev.py [status|uninstall]` runs
+these at the pinned release.
+
 ## The core, read from your working copy
 
 `--env src` adds `# env: <abs path>` to each component: Rhino then imports your core

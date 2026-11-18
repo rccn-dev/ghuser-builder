@@ -31,36 +31,17 @@ components/RingPoints/
 └── icon.png         24 × 24
 ```
 
-## Make the .yak
+## Not made from the template?
 
-From your project folder:
+Copy ghuser-template's `scripts/` folder and the `[tool.ghuser]` table of its
+`pyproject.toml` into your project, set `yak-name` (and `yak-include` if the core ships
+inside), and use the two commands above. They build the pinned image on first use and
+send files to Docker as a tar stream, so every Docker builds what is on disk.
 
-```bash
-docker build -t ghuser-builder:local https://github.com/rccn-dev/ghuser-builder.git#v1.2.1   # once
-cp <ghuser-builder>/templates/local/ghuser scripts/ghuser          # once (Windows: ghuser.py)
-scripts/ghuser --yak my-tool --version 0.1.0                      # -> dist/my-tool-0.1.0-rh8_0-any.yak
-```
-
-Drag the `.yak` onto Rhino 8 and restart Rhino.
-
-## Try components while you work
-
-```bash
-uv run <ghuser-builder>/local/ghuser_dev.py deploy components dist-dev --env src
-```
-
-The components appear in Grasshopper (after a first restart) and read your core
-library straight from `src/`. Run the same command after every edit, then:
-
-| You edited | Do |
-| --- | --- |
-| the core in `src/` | nothing: the canvas updates |
-| a `code.py` | replace that component on the canvas |
-| a `metadata.json` or `icon.png`, or added a component | restart Rhino, then replace it |
-
-A component that needs replacing turns red and says so (`dev: replace`). Before you
-install the `.yak`, remove the dev link:
-`uv run <ghuser-builder>/local/ghuser_dev.py uninstall dist-dev`.
+Underneath, `scripts/dev.py` runs [`local/ghuser_dev.py`](local/ghuser_dev.py) at the
+pinned release, and `scripts/ghuser.py` runs `ghuser-build` in the image. Their options:
+[usage.md](docs/usage.md); how the dev loop works and what each edit needs:
+[dev-builds.md](docs/dev-builds.md).
 
 ## Build in CI
 
@@ -73,8 +54,8 @@ install the `.yak`, remove the dev link:
   variables:
     GHUSER_YAK_NAME: my-tool
   ```
-- **GitHub:** use ghuser-template's workflows, or copy
-  [`templates/github/build-ghuser.yml`](templates/github/build-ghuser.yml).
+- **GitHub:** ghuser-template's `.github/workflows/`: it builds the pinned image on
+  the runner with the same `scripts/ghuser.py` as on a laptop.
 
 ## When something goes wrong
 
@@ -82,9 +63,9 @@ install the `.yak`, remove the dev link:
 | --- | --- |
 | `docker not found`, or Docker is not running | install or start Docker; the message says how |
 | `[FAILED] <component>: ...` | fix what it names in that folder; nothing was written |
-| a component twice in Grasshopper | `ghuser_dev.py status dist-dev` names the copy; uninstall the package while you develop |
-| a red component labelled `dev: ...` | replace it; restart Rhino first if the label says so |
-| the core imports an old version | `deploy` again with Rhino open; or restart Rhino |
+| a component twice in Grasshopper | `uv run scripts/dev.py status` names the copy; uninstall the package while you develop |
+| a red component labelled `dev: ...` | replace it; restart Rhino first if the label says so ([what each means](docs/dev-builds.md#stale-components-stop)) |
+| the core imports an old version | `uv run scripts/dev.py` again with Rhino open; or restart Rhino |
 
 ## More
 

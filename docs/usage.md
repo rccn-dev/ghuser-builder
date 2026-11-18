@@ -45,20 +45,16 @@ when packaging or verification fails.
 
 ## On your machine
 
-```bash
-docker build -t ghuser-builder:local https://github.com/rccn-dev/ghuser-builder.git#v1.2.1   # once
-cp templates/local/ghuser <project>/scripts/ghuser
-scripts/ghuser --yak my-tool               # components/ -> dist/
-```
+Use ghuser-template's `scripts/ghuser.py` (any OS): it reads `[tool.ghuser]` from
+`pyproject.toml`, builds `ghuser-builder:<release>` from the pinned tag the first time,
+and sends the components to the container as a tar stream, never a mounted folder.
+Options after it pass through to `ghuser-build`. `GHUSER_BUILDER_IMAGE` names another
+image; `GHUSER_BUILDER_SRC=<checkout>` builds from a checkout (testing a branch).
 
-It runs `docker run` with the project folder mounted. On colima, start it with
-`--mount-type virtiofs`: its default sshfs can serve a file you just saved in its old
-version (ghuser-template's scripts avoid the mount altogether, sending files as a tar
-stream). On Windows, copy `templates/local/ghuser.py` instead and run
-`uv run scripts/ghuser.py --yak my-tool`. Either uses `ghuser-builder:local` unless
-`GHUSER_BUILDER_IMAGE` names another image.
-
-Where mounting is not possible (`act` on macOS, some Docker-in-Docker setups),
+[`templates/local/`](../templates/local) holds the older scripts that mount the project
+folder (`ghuser`, `ghuser.py`): superseded, and removed in 1.3.0. A mount on colima's
+default sshfs can serve a file you just saved in its old version. Where neither a mount
+nor stdin works (`act` on macOS, some Docker-in-Docker setups),
 [`templates/local/Dockerfile`](../templates/local/Dockerfile) builds the same thing and
 exports it through BuildKit.
 
@@ -85,7 +81,8 @@ Projects upgrade by changing `ref:` in their `include:`: the template and image 
 
 ## In a GitHub project
 
-[`templates/github/build-ghuser.yml`](../templates/github/build-ghuser.yml): the same image
-as a job `container:`. Mirror the image to ghcr.io first, or make the registry public.
-ghuser-template does it differently: it builds the image on the runner from the pinned
-release, with the same script as on a laptop.
+Use ghuser-template's `.github/workflows/build-ghuser.yml`: it runs `scripts/ghuser.py`
+on the runner, which builds the image from the pinned release, so nothing needs to be
+published to a registry. [`templates/github/build-ghuser.yml`](../templates/github/build-ghuser.yml)
+runs a mirrored image as a job `container:`; no such mirror is published, so it is
+superseded and removed in 1.3.0.

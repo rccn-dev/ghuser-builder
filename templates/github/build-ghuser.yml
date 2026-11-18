@@ -1,3 +1,5 @@
+# Superseded by ghuser-template's .github/workflows/build-ghuser.yml, which needs no
+# published image; removed in 1.3.0.
 # Copy to .github/workflows/build-ghuser.yml in a GitHub-hosted project.
 # Same image, same command as GitLab and local Docker. Needs the image to be
 # pullable from GitHub: mirror it to ghcr.io, or make the GitLab registry public.
