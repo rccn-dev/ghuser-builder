@@ -25,7 +25,8 @@ ghuser-template (and in projects made from it, on purpose).
 
 ## Planned for 1.3.0
 
-After the 2026-11-18 class (moving the pin then makes every lab PC rebuild the image):
+Not before machines that preloaded the 1.2.1 image can rebuild it: moving the pin makes
+each one build the new image the first time.
 
 - **One local client, here.** The tar-stream run, `IN_IMAGE`, and telling Docker Desktop,
   colima and OrbStack apart move from ghuser-template's `scripts/_builder.py` into
